@@ -4,6 +4,8 @@ import uuid
 import glob
 import html
 import sqlite3
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -516,6 +518,19 @@ app.add_handler(CommandHandler("setvip", set_vip))
 app.add_handler(CommandHandler("addcredit", add_credit))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
+# راه‌اندازی وب‌سرور داخلی برای رفع خطای پورت در Render
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running!")
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+threading.Thread(target=run_web_server, daemon=True).start()
 
 print("ربات با تنظیمات Render و پشتیبانی @saeed_mz77 فعال شد...")
 app.run_polling()
