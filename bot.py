@@ -24,8 +24,8 @@ SUPPORT_ID = os.environ.get("SUPPORT_ID", "@saeed_mz77")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@YourChannelID")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "123456789"))
 
-VIP_PRICE_TEXT = "ماهانه ۵۰ هزار تومان | دائمی ۱۰۰ هزار تومان"
-CARD_NUMBER = "۶۰۳۷-xxxx-xxxx-xxxx به نام شما"
+VIP_PRICE_TEXT = "ماهانه ۳۵۰ هزار تومان | دائمی ۵۰۰ هزار تومان"
+CARD_NUMBER = "۶۲۱۹-۸۶۱۹-۴۳۵۳-۱۹۳۸ به نام سعید محمدزاده"
 # =========================================================================
 
 # راه‌اندازی دیتابیس کاربران
