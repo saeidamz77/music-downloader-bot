@@ -22,14 +22,12 @@ from telegram.ext import (
 import yt_dlp
 from shazamio import Shazam
 
-# ==================== تنظیمات دستی و قطعی ربات ====================
-# توکن، آیدی ربات، آیدی کانال و پشتیبانی را در زیر تنظیم فرمایید:
-TOKEN = os.environ.get("8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY") or "توکن_ربات_شما"
-BOT_USERNAME = os.environ.get("@Instadlmusicbot") or "@YourBotUsername"
+# ==================== تنظیمات مستقیم ربات ====================
+TOKEN = "8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY"
+BOT_USERNAME = "@Instadlmusicbot"
 SUPPORT_ID = "@saeed_mz77"
-CHANNEL_ID = os.environ.get("@ainewss2026") or ""
-ADMIN_ID = int(os.environ.get("1773399042") or "123456789")
-
+CHANNEL_ID = "@ainewss2026"
+ADMIN_ID = 1773399042  # آیدی عددی شما
 VIP_PRICE_TEXT = "ماهانه 350 هزار تومان | دائمی 500 هزار تومان"
 CARD_NUMBER = "6219-8619-4353-1938 به نام سعید محمدزاده"
 # ==================================================================
