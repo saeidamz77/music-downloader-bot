@@ -25,8 +25,8 @@ BOT_USERNAME = "@Instadlmusicbot"
 SUPPORT_ID = "@saeed_mz77"
 CHANNEL_ID = "@ainewss2026"
 ADMIN_ID = 1773399042  # آیدی عددی شما
-VIP_PRICE_TEXT = "ماهانه 350 هزار تومان | دائمی 50 هزار تومان"
-CARD_NUMBER = "6219-8619-4353-1938 به نام شما"
+VIP_PRICE_TEXT = "ماهانه 350 هزار تومان | دائمی 500 هزار تومان"
+CARD_NUMBER = "6219-8619-4353-1938 به نام سعید محمدزاده"
 # ==============================================================
 
 conn = sqlite3.connect("bot_database.db", check_same_thread=False)
@@ -97,11 +97,9 @@ def consume_credit(user_id: int) -> bool:
     return False
 
 def extract_music_keywords(title: str, desc: str) -> list:
-    """استخراج کلمات کلیدی هوشمند برای سرچ نسخه‌های ریمیکس و کامل"""
     full = f"{title or ''} {desc or ''}"
     candidates = []
 
-    # الگوهای پیدا کردن نام در کپشن
     found = re.findall(r'(?:موزیک|آهنگ|اهنگ|music|song|track|remix)\s*[:：\-]?\s*([^\n\r#@]+)', full, re.IGNORECASE)
     for f in found:
         cleaned = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+|[\(\[\{].*?[\)\]\}]', ' ', f)
@@ -109,23 +107,19 @@ def extract_music_keywords(title: str, desc: str) -> list:
         if len(cleaned) > 2:
             candidates.append(cleaned)
 
-    # پاکسازی عنوان خام کلیپ
     raw_clean = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+|(?i)(video by|reel by|audio by|original audio|insta|clip|ریلز|پست)', ' ', full.split('\n')[0])
     raw_clean = ' '.join(re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', raw_clean).split())
     if len(raw_clean) > 2:
         candidates.append(raw_clean)
 
-    # حذف تکراری‌ها با حفظ ترتیب
     res = []
     for c in candidates:
         if c not in res:
             res.append(c)
     return res
 
-# ساخت نسخه Extended چند دقیقه‌ای در صورتی که هیچ نسخه بلندی در دنیا نبود
 def make_extended_version(input_audio: str, output_audio: str):
     try:
-        # لوپ کردن تمیز با افکت fade برای تبدیل فایل ۱۵ ثانیه‌ای به یک فایل کامل ۲:۳۰ دقیقه‌ای
         cmd = (
             f"ffmpeg -y -stream_loop 6 -i {input_audio} -t 150 -af "
             f"afade=t=out:st=145:d=5 -acodec libmp3lame -b:a 320k {output_audio} >/dev/null 2>&1"
@@ -135,7 +129,7 @@ def make_extended_version(input_audio: str, output_audio: str):
     except Exception:
         return False
 
-# ==================== هندلرهای تلگرام ====================
+# ==================== هندلرهای پیام و فرامین تلگرام ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     args = context.args
@@ -153,22 +147,114 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text = (
         "👑 <b>ربات هوشمند دانلود نسخه کامل آهنگ‌های ریلز (Full Track)</b>\n\n"
-        "⚡️ <b>تضمین ارسال نسخه چند دقیقه‌ای:</b>\n"
-        "- لینک هر ریلز اینستاگرام یا یوتیوب را بفرستید تا نسخه کامل ۳ تا ۵ دقیقه‌ای (اورجینال یا ریمیکس) ارسال شود.\n"
-        "- حتی اگر آهنگ رسمی نباشد، کامل‌ترین نسخه منتشر شده در وب تحویل داده می‌شود.\n"
-        "- امکان دانلود خود ویدیو با بالاترین کیفیت نیز فعال است."
+        "⚡️ <b>تضمین ارسال نسخه کامل و چند دقیقه‌ای:</b>\n"
+        "- لینک هر ریلز اینستاگرام یا یوتیوب را بفرستید تا نسخه کامل ۳ تا ۵ دقیقه‌ای ارسال شود.\n"
+        "- حتی اگر نسخه رسمی نباشد، کامل‌ترین نسخه استودیویی یا ریمیکس تحویل داده می‌شود.\n"
+        "- دانلود ویدیوی باکیفیت و استخراج صدا نیز فعال است."
     )
     kb = [
-        [InlineKeyboardButton("👤 پنل کاربری و دعوت دوستان", callback_data="user_panel")],
+        [InlineKeyboardButton("👤 حساب کاربری و زیرمجموعه", callback_data="user_panel")],
         [InlineKeyboardButton("⭐️ خرید اشتراک نامحدود (VIP)", callback_data="buy_vip")]
     ]
-    if user_id == ADMIN_ID and ADMIN_ID != 0:
-        kb.append([InlineKeyboardButton("⚙️ پنل مدیریت", callback_data="admin_panel")])
+    if user_id == ADMIN_ID:
+        kb.append([InlineKeyboardButton("⚙️ پنل مدیریت ربات", callback_data="admin_panel")])
 
     await update.message.reply_text(welcome_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
 
+# دستور مستقیم ورود به پنل ادمین
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await show_admin_panel(update.message)
+
+async def show_admin_panel(target_message):
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_vip = 1")
+    vip_users = cursor.fetchone()[0]
+
+    panel_text = (
+        "⚙️ <b>پنل مدیریت ربات</b>\n"
+        "-------------------\n"
+        f"👥 کل کاربران ثبت‌شده: <code>{total_users} نفر</code>\n"
+        f"⭐️ کاربران طلایی (VIP): <code>{vip_users} نفر</code>\n"
+        "-------------------\n"
+        "یک بخش را جهت مدیریت انتخاب کنید:"
+    )
+    kb = [
+        [InlineKeyboardButton("📊 آمار دقیق کاربران", callback_data="admin_stats")],
+        [InlineKeyboardButton("👑 فعال‌سازی VIP کاربر", callback_data="admin_set_vip"), InlineKeyboardButton("❌ لغو VIP", callback_data="admin_rem_vip")],
+        [InlineKeyboardButton("➕ افزودن اعتبار کاربر", callback_data="admin_add_credit")],
+        [InlineKeyboardButton("📢 ارسال پیام همگانی (برودکست)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🔙 خروج از پنل", callback_data="admin_close")]
+    ]
+    if hasattr(target_message, 'edit_text'):
+        await target_message.edit_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+    else:
+        await target_message.reply_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+
+    # بررسی حالت‌های تعاملی پنل مدیریت (Admin Prompt States)
+    admin_state = context.user_data.get('admin_state')
+    if user_id == ADMIN_ID and admin_state:
+        text_input = update.message.text.strip()
+
+        if admin_state == "set_vip":
+            try:
+                target_uid = int(text_input)
+                cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (target_uid,))
+                conn.commit()
+                context.user_data['admin_state'] = None
+                await update.message.reply_text(f"✅ کاربر <code>{target_uid}</code> به کاربر VIP ارتقا یافت.", parse_mode="HTML")
+                await show_admin_panel(update.message)
+            except Exception:
+                await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر ارسال کنید یا /cancel بزنید.")
+            return
+
+        elif admin_state == "rem_vip":
+            try:
+                target_uid = int(text_input)
+                cursor.execute("UPDATE users SET is_vip = 0 WHERE user_id = ?", (target_uid,))
+                conn.commit()
+                context.user_data['admin_state'] = None
+                await update.message.reply_text(f"✅ دسترسی VIP کاربر <code>{target_uid}</code> لغو شد.", parse_mode="HTML")
+                await show_admin_panel(update.message)
+            except Exception:
+                await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر ارسال کنید.")
+            return
+
+        elif admin_state == "add_credit":
+            try:
+                parts = text_input.split()
+                target_uid = int(parts[0])
+                amount = int(parts[1])
+                cursor.execute("UPDATE users SET requests_left = requests_left + ? WHERE user_id = ?", (amount, target_uid))
+                conn.commit()
+                context.user_data['admin_state'] = None
+                await update.message.reply_text(f"✅ تعداد {amount} اعتبار به کاربر <code>{target_uid}</code> اضافه شد.", parse_mode="HTML")
+                await show_admin_panel(update.message)
+            except Exception:
+                await update.message.reply_text("❌ فرمت نادرست است! مثال:\n<code>123456789 10</code> (آیدی و سپس فاصله و تعداد)")
+            return
+
+        elif admin_state == "broadcast":
+            context.user_data['admin_state'] = None
+            status_msg = await update.message.reply_text("⏳ در حال ارسال پیام به تمام کاربران...")
+            cursor.execute("SELECT user_id FROM users")
+            all_users = cursor.fetchall()
+            sent_count = 0
+            for u in all_users:
+                try:
+                    await context.bot.send_message(chat_id=u[0], text=text_input, parse_mode="HTML")
+                    sent_count += 1
+                except Exception:
+                    pass
+            await status_msg.edit_text(f"📢 پیام همگانی با موفقیت برای <b>{sent_count}</b> نفر ارسال شد.", parse_mode="HTML")
+            await show_admin_panel(update.message)
+            return
+
     if not await check_membership(user_id, context):
         channel_link = f"https://t.me/{CHANNEL_ID.replace('@', '')}"
         kb = [[InlineKeyboardButton("📢 عضویت", url=channel_link)], [InlineKeyboardButton("✅ تأیید", callback_data="check_join")]]
@@ -199,7 +285,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['media_url'] = text
             credit_txt = "نامحدود (VIP)" if is_vip else f"{req_left} عدد"
             menu_text = (
-                "🎯 <b>رسانه شناسایی شد</b>\n"
+                "🎯 <b>رسانه دریافت شد</b>\n"
                 f"وضعیت اعتبار: <code>{credit_txt}</code>\n"
                 "-------------------\n"
                 "گزینه مدنظر خود را انتخاب فرمایید:"
@@ -214,7 +300,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("لطفاً لینک یوتیوب یا اینستاگرام ارسال کنید.")
         return
 
-    # جستجوی متنی نام موزیک
+    # سرچ متنی موزیک
     search_msg = await update.message.reply_text(f"🔍 در حال جستجوی نسخه کامل «{html.escape(text)}»...", parse_mode="HTML")
     ydl_opts = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
     try:
@@ -245,10 +331,61 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     await query.answer()
 
+    # عملیات پنل مدیریت
+    if data.startswith("admin_"):
+        if user_id != ADMIN_ID:
+            await query.answer("⛔️ دسترسی غیرمجاز!", show_alert=True)
+            return
+
+        if data == "admin_panel":
+            await show_admin_panel(query.message)
+            return
+
+        if data == "admin_stats":
+            cursor.execute("SELECT COUNT(*) FROM users")
+            total = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM users WHERE is_vip = 1")
+            vips = cursor.fetchone()[0]
+            cursor.execute("SELECT SUM(invites_count) FROM users")
+            total_invites = cursor.fetchone()[0] or 0
+            stats_text = (
+                "📊 <b>آمار تفصیلی ربات</b>\n\n"
+                f"👥 کل کاربران: <code>{total}</code>\n"
+                f"👑 کاربران طلایی: <code>{vips}</code>\n"
+                f"🔗 کل دعوتهای انجام‌شده: <code>{total_invites}</code>\n"
+            )
+            kb = [[InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_panel")]]
+            await query.message.edit_text(stats_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+            return
+
+        if data == "admin_set_vip":
+            context.user_data['admin_state'] = "set_vip"
+            await query.message.reply_text("👑 لطفاً <b>شناسه عددی کاربر</b> مورد نظر را برای ارتقا به VIP ارسال کنید:", parse_mode="HTML")
+            return
+
+        if data == "admin_rem_vip":
+            context.user_data['admin_state'] = "rem_vip"
+            await query.message.reply_text("❌ لطفاً <b>شناسه عددی کاربر</b> مورد نظر را برای حذف دسترسی VIP ارسال کنید:", parse_mode="HTML")
+            return
+
+        if data == "admin_add_credit":
+            context.user_data['admin_state'] = "add_credit"
+            await query.message.reply_text("➕ شناسه عددی کاربر و تعداد اعتبار را با یک فاصله بفرستید:\nمثال:\n<code>123456789 10</code>", parse_mode="HTML")
+            return
+
+        if data == "admin_broadcast":
+            context.user_data['admin_state'] = "broadcast"
+            await query.message.reply_text("📢 لطفاً <b>متن پیام همگانی</b> را برای ارسال به تمام کاربران بفرستید:", parse_mode="HTML")
+            return
+
+        if data == "admin_close":
+            await query.message.delete()
+            return
+
     if data == "check_join":
         if await check_membership(user_id, context):
             await query.message.delete()
-            await query.message.reply_text("عضویت تأیید شد! اکنون لینک یا ویدیو بفرستید.")
+            await query.message.reply_text("عضویت تأیید شد! اکنون می‌توانید لینک یا ویدیو بفرستید.")
         else:
             await query.answer("هنوز عضو کانال نشده‌اید!", show_alert=True)
         return
@@ -289,7 +426,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(panel_text, parse_mode="HTML")
         return
 
-    # موتور استخراج تضمینی نسخه کامل چند دقیقه‌ای
+    # استخراج قطعی آهنگ کامل
     if data == "get_guaranteed_full_music":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما به پایان رسیده است.")
@@ -322,15 +459,12 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             raw_file = get_output_file(prefix)
 
-            # ۱. بررسی تگ‌های اصلی ریلز
             if artist_tag and track_tag:
                 queries_to_try.append(f"{artist_tag} {track_tag}")
 
-            # ۲. بررسی کلمات کلیدی کپشن و متن ریلز
             extracted_words = extract_music_keywords(meta_title, meta_desc)
             queries_to_try.extend(extracted_words)
 
-            # ۳. بررسی صوتی با Shazam
             if raw_file:
                 os.system(f"ffmpeg -y -i {raw_file} -ss 00:00:03 -t 15 -acodec copy {sample_cut} >/dev/null 2>&1")
                 test_audio = sample_cut if os.path.exists(sample_cut) else raw_file
@@ -344,7 +478,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     pass
 
-            # ۴. جستجوی قطعی نسخه چند دقیقه‌ای (حداقل بالای ۶۰ تا ۹۰ ثانیه)
             sent_full = False
             for target_query in queries_to_try[:4]:
                 if not target_query or len(target_query) < 3:
@@ -354,10 +487,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if sent_full:
                     break
 
-            # ۵. چاره قطعی (اگر در کل اینترنت فقط نسخه کوتاه همان کلیپ موجود بود):
-            # تولید و ارسال یک نسخه کامل ۲:۳۰ دقیقه‌ای استودیویی با کیفیت ۳۲۰
             if not sent_full and raw_file and os.path.exists(raw_file):
-                await status.edit_text("⚡️ <i>نسخه کامل مجزا منتشر نشده؛ در حال آماده‌سازی و ساخت نسخه کامل آهنگ برای شما...</i>", parse_mode="HTML")
+                await status.edit_text("⚡️ <i>در حال آماده‌سازی و ساخت نسخه کامل آهنگ برای شما...</i>", parse_mode="HTML")
                 extended_file = f"full_ext_{uid}.mp3"
                 if make_extended_version(raw_file, extended_file):
                     final_path = extended_file
@@ -386,7 +517,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             clean_files(sample_cut)
         return
 
-    # دانلود ویدیو یا صدای اصلی
+    # دانلود ویدیو یا صدای اصلی کلیپ
     if data in ["get_full_video", "get_clip_audio"]:
         if not consume_credit(user_id):
             await query.message.reply_text("سهمیه شما تمام شده است.")
@@ -425,7 +556,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = await query.message.reply_text("در حال ارسال فایل...", parse_mode="HTML")
         await process_direct_media(target_url, is_video, query.message.chat_id, context, status)
 
-# تابع دانلود نسخه‌ای که مدت زمان آن حتماً بالای ۹۰ ثانیه باشد (آهنگ کامل واقعی)
 async def download_strictly_full_track(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
     uid = uuid.uuid4().hex[:8]
     prefix = f"full_{uid}"
@@ -436,7 +566,6 @@ async def download_strictly_full_track(query_text: str, chat_id: int, context: C
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
     }
 
-    # ترجیح نسخه‌های کامل، ریمیکس کامل یا اکستندد
     search_variants = [
         f"{query_text} full remix",
         f"{query_text} extended mix",
@@ -450,11 +579,10 @@ async def download_strictly_full_track(query_text: str, chat_id: int, context: C
                 res = ydl.extract_info(f"ytsearch4:{sv}", download=False)
                 entries = res.get('entries', [])
 
-            # پیدا کردن گزینه‌ای که مدت آن حتماً بالای ۹۰ ثانیه باشد (نه شورت و ریلز چند ثانیه‌ای)
             best_entry = None
             for e in entries:
                 dur = e.get('duration', 0)
-                if dur and dur >= 85:  # حداقل ۱:۲۵ دقیقه به بالا
+                if dur and dur >= 85:
                     best_entry = e
                     break
 
@@ -528,7 +656,29 @@ async def process_direct_media(target_url, is_video, chat_id, context, status_ms
     finally:
         clean_files(prefix)
 
-# وب‌سرور داخلی برای فعال ماندن روی Render
+# دستورات سنتی مدیریتی (Fallback Commands)
+async def set_vip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    try:
+        target_uid = int(context.args[0])
+        cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (target_uid,))
+        conn.commit()
+        await update.message.reply_text(f"✅ کاربر {target_uid} به اشتراک VIP ارتقا یافت.")
+    except Exception:
+        await update.message.reply_text("راهنما: /setvip 123456789")
+
+async def add_credit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    try:
+        target_uid = int(context.args[0])
+        amount = int(context.args[1])
+        cursor.execute("UPDATE users SET requests_left = requests_left + ? WHERE user_id = ?", (amount, target_uid))
+        conn.commit()
+        await update.message.reply_text(f"✅ به کاربر {target_uid} تعداد {amount} اعتبار اضافه شد.")
+    except Exception:
+        await update.message.reply_text("راهنما: /addcredit 123456789 10")
+
+# وب‌سرور داخلی سبک Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -552,8 +702,12 @@ app = (
 )
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("admin", admin_command))
+app.add_handler(CommandHandler("panel", admin_command))
+app.add_handler(CommandHandler("setvip", set_vip_cmd))
+app.add_handler(CommandHandler("addcredit", add_credit_cmd))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با موتور تضمینی نسخه کامل چند دقیقه‌ای فعال شد...")
+print("ربات با پنل مدیریت تعاملی و موتور استخراج نسخه کامل روشن شد...")
 app.run_polling()
