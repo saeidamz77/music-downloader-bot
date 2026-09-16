@@ -129,6 +129,41 @@ def make_extended_version(input_audio: str, output_audio: str):
     except Exception:
         return False
 
+# ==================== پنل مدیریت ====================
+async def show_admin_panel(message_target):
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM users WHERE is_vip = 1")
+    vip_users = cursor.fetchone()[0]
+
+    panel_text = (
+        "⚙️ <b>پنل مدیریت ربات</b>\n"
+        "-------------------\n"
+        f"👥 کل کاربران ثبت‌شده: <code>{total_users} نفر</code>\n"
+        f"⭐️ کاربران طلایی (VIP): <code>{vip_users} نفر</code>\n"
+        "-------------------\n"
+        "یک بخش را جهت مدیریت انتخاب کنید:"
+    )
+    kb = [
+        [InlineKeyboardButton("📊 آمار دقیق کاربران", callback_data="admin_stats")],
+        [InlineKeyboardButton("👑 فعال‌سازی VIP کاربر", callback_data="admin_set_vip"), InlineKeyboardButton("❌ لغو VIP", callback_data="admin_rem_vip")],
+        [InlineKeyboardButton("➕ افزودن اعتبار کاربر", callback_data="admin_add_credit")],
+        [InlineKeyboardButton("📢 ارسال پیام همگانی (برودکست)", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🔙 خروج از پنل", callback_data="admin_close")]
+    ]
+    try:
+        if hasattr(message_target, 'edit_text'):
+            await message_target.edit_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+        else:
+            await message_target.reply_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+    except Exception:
+        pass
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await show_admin_panel(update.message)
+
 # ==================== هندلرهای پیام و فرامین تلگرام ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -161,87 +196,68 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(welcome_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
 
-# دستور مستقیم ورود به پنل ادمین
-async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    await show_admin_panel(update.message)
-
-async def show_admin_panel(target_message):
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total_users = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM users WHERE is_vip = 1")
-    vip_users = cursor.fetchone()[0]
-
-    panel_text = (
-        "⚙️ <b>پنل مدیریت ربات</b>\n"
-        "-------------------\n"
-        f"👥 کل کاربران ثبت‌شده: <code>{total_users} نفر</code>\n"
-        f"⭐️ کاربران طلایی (VIP): <code>{vip_users} نفر</code>\n"
-        "-------------------\n"
-        "یک بخش را جهت مدیریت انتخاب کنید:"
-    )
-    kb = [
-        [InlineKeyboardButton("📊 آمار دقیق کاربران", callback_data="admin_stats")],
-        [InlineKeyboardButton("👑 فعال‌سازی VIP کاربر", callback_data="admin_set_vip"), InlineKeyboardButton("❌ لغو VIP", callback_data="admin_rem_vip")],
-        [InlineKeyboardButton("➕ افزودن اعتبار کاربر", callback_data="admin_add_credit")],
-        [InlineKeyboardButton("📢 ارسال پیام همگانی (برودکست)", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("🔙 خروج از پنل", callback_data="admin_close")]
-    ]
-    if hasattr(target_message, 'edit_text'):
-        await target_message.edit_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
-    else:
-        await target_message.reply_text(panel_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # بررسی حالت‌های تعاملی پنل مدیریت (Admin Prompt States)
+    # بررسی مراحل پنل مدیریت
     admin_state = context.user_data.get('admin_state')
     if user_id == ADMIN_ID and admin_state:
         text_input = update.message.text.strip()
 
+        if text_input in ["/cancel", "انصراف", "کنسل"]:
+            context.user_data['admin_state'] = None
+            await update.message.reply_text(" عملیات لغو شد.")
+            await show_admin_panel(update.message)
+            return
+
         if admin_state == "set_vip":
+            context.user_data['admin_state'] = None
             try:
                 target_uid = int(text_input)
+                get_or_create_user(target_uid)
                 cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (target_uid,))
                 conn.commit()
-                context.user_data['admin_state'] = None
                 await update.message.reply_text(f"✅ کاربر <code>{target_uid}</code> به کاربر VIP ارتقا یافت.", parse_mode="HTML")
-                await show_admin_panel(update.message)
-            except Exception:
-                await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر ارسال کنید یا /cancel بزنید.")
+            except ValueError:
+                await update.message.reply_text("❌ شناسه باید فقط عدد باشد.")
+            except Exception as e:
+                await update.message.reply_text(f"⚠️ خطای دیتابیس: {e}")
+            await show_admin_panel(update.message)
             return
 
         elif admin_state == "rem_vip":
+            context.user_data['admin_state'] = None
             try:
                 target_uid = int(text_input)
                 cursor.execute("UPDATE users SET is_vip = 0 WHERE user_id = ?", (target_uid,))
                 conn.commit()
-                context.user_data['admin_state'] = None
                 await update.message.reply_text(f"✅ دسترسی VIP کاربر <code>{target_uid}</code> لغو شد.", parse_mode="HTML")
-                await show_admin_panel(update.message)
-            except Exception:
-                await update.message.reply_text("❌ لطفاً یک شناسه عددی معتبر ارسال کنید.")
+            except ValueError:
+                await update.message.reply_text("❌ شناسه باید فقط عدد باشد.")
+            await show_admin_panel(update.message)
             return
 
         elif admin_state == "add_credit":
+            context.user_data['admin_state'] = None
             try:
                 parts = text_input.split()
+                if len(parts) < 2:
+                    raise ValueError("کمبود ورودی")
                 target_uid = int(parts[0])
                 amount = int(parts[1])
+
+                get_or_create_user(target_uid)
                 cursor.execute("UPDATE users SET requests_left = requests_left + ? WHERE user_id = ?", (amount, target_uid))
                 conn.commit()
-                context.user_data['admin_state'] = None
-                await update.message.reply_text(f"✅ تعداد {amount} اعتبار به کاربر <code>{target_uid}</code> اضافه شد.", parse_mode="HTML")
-                await show_admin_panel(update.message)
-            except Exception:
-                await update.message.reply_text("❌ فرمت نادرست است! مثال:\n<code>123456789 10</code> (آیدی و سپس فاصله و تعداد)")
+                await update.message.reply_text(f"✅ تعداد {amount} اعتبار به کاربر <code>{target_uid}</code> افزوده شد.", parse_mode="HTML")
+            except (ValueError, IndexError):
+                await update.message.reply_text("❌ فرمت ورودی اشتباه است!\nمثال صحیح: <code>1773399042 10</code>", parse_mode="HTML")
+            await show_admin_panel(update.message)
             return
 
         elif admin_state == "broadcast":
             context.user_data['admin_state'] = None
-            status_msg = await update.message.reply_text("⏳ در حال ارسال پیام به تمام کاربران...")
+            status_msg = await update.message.reply_text("⏳ در حال ارسال پیام همگانی...")
             cursor.execute("SELECT user_id FROM users")
             all_users = cursor.fetchall()
             sent_count = 0
@@ -251,7 +267,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sent_count += 1
                 except Exception:
                     pass
-            await status_msg.edit_text(f"📢 پیام همگانی با موفقیت برای <b>{sent_count}</b> نفر ارسال شد.", parse_mode="HTML")
+            await status_msg.edit_text(f"📢 پیام همگانی به <b>{sent_count}</b> کاربر با موفقیت ارسال شد.", parse_mode="HTML")
             await show_admin_panel(update.message)
             return
 
@@ -300,7 +316,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("لطفاً لینک یوتیوب یا اینستاگرام ارسال کنید.")
         return
 
-    # سرچ متنی موزیک
     search_msg = await update.message.reply_text(f"🔍 در حال جستجوی نسخه کامل «{html.escape(text)}»...", parse_mode="HTML")
     ydl_opts = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
     try:
@@ -329,9 +344,13 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
     user_id = query.from_user.id
-    await query.answer()
 
-    # عملیات پنل مدیریت
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+    # عملیات پنل ادمین
     if data.startswith("admin_"):
         if user_id != ADMIN_ID:
             await query.answer("⛔️ دسترسی غیرمجاز!", show_alert=True)
@@ -349,10 +368,10 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("SELECT SUM(invites_count) FROM users")
             total_invites = cursor.fetchone()[0] or 0
             stats_text = (
-                "📊 <b>آمار تفصیلی ربات</b>\n\n"
-                f"👥 کل کاربران: <code>{total}</code>\n"
-                f"👑 کاربران طلایی: <code>{vips}</code>\n"
-                f"🔗 کل دعوتهای انجام‌شده: <code>{total_invites}</code>\n"
+                "📊 <b>آمار دقیق و تفصیلی ربات</b>\n\n"
+                f"👥 کل کاربران: <code>{total} نفر</code>\n"
+                f"👑 کاربران دارای اشتراک طلایی: <code>{vips} نفر</code>\n"
+                f"🔗 کل زیرمجموعه‌ها: <code>{total_invites} عدد</code>\n"
             )
             kb = [[InlineKeyboardButton("🔙 بازگشت به پنل مدیریت", callback_data="admin_panel")]]
             await query.message.edit_text(stats_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
@@ -360,22 +379,22 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if data == "admin_set_vip":
             context.user_data['admin_state'] = "set_vip"
-            await query.message.reply_text("👑 لطفاً <b>شناسه عددی کاربر</b> مورد نظر را برای ارتقا به VIP ارسال کنید:", parse_mode="HTML")
+            await query.message.reply_text("👑 <b>شناسه عددی کاربر</b> را برای ارتقا به VIP ارسال فرمایید:\n(برای انصراف /cancel بفرستید)", parse_mode="HTML")
             return
 
         if data == "admin_rem_vip":
             context.user_data['admin_state'] = "rem_vip"
-            await query.message.reply_text("❌ لطفاً <b>شناسه عددی کاربر</b> مورد نظر را برای حذف دسترسی VIP ارسال کنید:", parse_mode="HTML")
+            await query.message.reply_text("❌ <b>شناسه عددی کاربر</b> را جهت لغو اشتراک VIP ارسال کنید:\n(برای انصراف /cancel بفرستید)", parse_mode="HTML")
             return
 
         if data == "admin_add_credit":
             context.user_data['admin_state'] = "add_credit"
-            await query.message.reply_text("➕ شناسه عددی کاربر و تعداد اعتبار را با یک فاصله بفرستید:\nمثال:\n<code>123456789 10</code>", parse_mode="HTML")
+            await query.message.reply_text("➕ شناسه کاربر و تعداد اعتبار را با یک فاصله بنویسید:\nمثال:\n<code>1773399042 10</code>", parse_mode="HTML")
             return
 
         if data == "admin_broadcast":
             context.user_data['admin_state'] = "broadcast"
-            await query.message.reply_text("📢 لطفاً <b>متن پیام همگانی</b> را برای ارسال به تمام کاربران بفرستید:", parse_mode="HTML")
+            await query.message.reply_text("📢 <b>متن پیام همگانی</b> را ارسال کنید تا برای همه کاربران فرستاده شود:", parse_mode="HTML")
             return
 
         if data == "admin_close":
@@ -389,38 +408,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.answer("هنوز عضو کانال نشده‌اید!", show_alert=True)
         return
-# پاسخ فوری به تلگرام برای متوقف شدن لودینگ دکمه
-    try:
-        await query.answer()
-    except Exception:
-        pass
 
-    # باز شدن پنل خرید VIP برای کاربران
-    if data == "buy_vip":
-        support_clean = SUPPORT_ID.replace("@", "")
-        support_url = f"https://t.me/{support_clean}"
-        vip_text = (
-            "👑 <b>عضویت ویژه طلایی (VIP)</b>\n"
-            "-------------------\n"
-            "- دانلود نامحدود بدون قفل و دعوت\n"
-            "- حداکثر سرعت در دریافت نسخه‌های ۳۲۰ استودیویی\n"
-            "- معاف از عضویت در کانال‌های اسپانسر\n\n"
-            f"💰 تعرفه: <b>{VIP_PRICE_TEXT}</b>\n"
-            f"💳 شماره کارت:\n<code>{CARD_NUMBER}</code>\n\n"
-            "تصویر فیش را به همراه شناسه زیر به پشتیبانی بفرستید:\n"
-            f"🆔 شناسه شما: <code>{user_id}</code>"
-        )
-        kb = [[InlineKeyboardButton("💬 ارسال فیش به پشتیبانی", url=support_url)]]
-        await query.message.reply_text(vip_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    # منوی ادمین
-    if data == "admin_panel":
-        if user_id != ADMIN_ID:
-            await query.answer("⛔️ این بخش فقط مخصوص مدیر است.", show_alert=True)
-            return
-        await show_admin_panel(query.message)
-        return
     if data == "buy_vip":
         support_clean = SUPPORT_ID.replace("@", "")
         support_url = f"https://t.me/{support_clean}"
@@ -457,7 +445,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(panel_text, parse_mode="HTML")
         return
 
-    # استخراج قطعی آهنگ کامل
+    # موتور استخراج آهنگ کامل چند دقیقه‌ای
     if data == "get_guaranteed_full_music":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما به پایان رسیده است.")
@@ -548,7 +536,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             clean_files(sample_cut)
         return
 
-    # دانلود ویدیو یا صدای اصلی کلیپ
+    # دانلود مستقیم ویدیو یا صدای اصلی
     if data in ["get_full_video", "get_clip_audio"]:
         if not consume_credit(user_id):
             await query.message.reply_text("سهمیه شما تمام شده است.")
@@ -687,11 +675,12 @@ async def process_direct_media(target_url, is_video, chat_id, context, status_ms
     finally:
         clean_files(prefix)
 
-# دستورات سنتی مدیریتی (Fallback Commands)
+# دستورات متنی مدیریت
 async def set_vip_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     try:
         target_uid = int(context.args[0])
+        get_or_create_user(target_uid)
         cursor.execute("UPDATE users SET is_vip = 1 WHERE user_id = ?", (target_uid,))
         conn.commit()
         await update.message.reply_text(f"✅ کاربر {target_uid} به اشتراک VIP ارتقا یافت.")
@@ -703,13 +692,14 @@ async def add_credit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         target_uid = int(context.args[0])
         amount = int(context.args[1])
+        get_or_create_user(target_uid)
         cursor.execute("UPDATE users SET requests_left = requests_left + ? WHERE user_id = ?", (amount, target_uid))
         conn.commit()
         await update.message.reply_text(f"✅ به کاربر {target_uid} تعداد {amount} اعتبار اضافه شد.")
     except Exception:
         await update.message.reply_text("راهنما: /addcredit 123456789 10")
 
-# وب‌سرور داخلی سبک Render
+# وب‌سرور داخلی سبک Render جهت پورت بایندینگ
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
