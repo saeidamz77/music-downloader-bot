@@ -389,7 +389,38 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.answer("هنوز عضو کانال نشده‌اید!", show_alert=True)
         return
+# پاسخ فوری به تلگرام برای متوقف شدن لودینگ دکمه
+    try:
+        await query.answer()
+    except Exception:
+        pass
 
+    # باز شدن پنل خرید VIP برای کاربران
+    if data == "buy_vip":
+        support_clean = SUPPORT_ID.replace("@", "")
+        support_url = f"https://t.me/{support_clean}"
+        vip_text = (
+            "👑 <b>عضویت ویژه طلایی (VIP)</b>\n"
+            "-------------------\n"
+            "- دانلود نامحدود بدون قفل و دعوت\n"
+            "- حداکثر سرعت در دریافت نسخه‌های ۳۲۰ استودیویی\n"
+            "- معاف از عضویت در کانال‌های اسپانسر\n\n"
+            f"💰 تعرفه: <b>{VIP_PRICE_TEXT}</b>\n"
+            f"💳 شماره کارت:\n<code>{CARD_NUMBER}</code>\n\n"
+            "تصویر فیش را به همراه شناسه زیر به پشتیبانی بفرستید:\n"
+            f"🆔 شناسه شما: <code>{user_id}</code>"
+        )
+        kb = [[InlineKeyboardButton("💬 ارسال فیش به پشتیبانی", url=support_url)]]
+        await query.message.reply_text(vip_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+        return
+
+    # منوی ادمین
+    if data == "admin_panel":
+        if user_id != ADMIN_ID:
+            await query.answer("⛔️ این بخش فقط مخصوص مدیر است.", show_alert=True)
+            return
+        await show_admin_panel(query.message)
+        return
     if data == "buy_vip":
         support_clean = SUPPORT_ID.replace("@", "")
         support_url = f"https://t.me/{support_clean}"
