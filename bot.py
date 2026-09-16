@@ -22,18 +22,14 @@ from telegram.ext import (
 import yt_dlp
 from shazamio import Shazam
 
-# ==================== دریافت تنظیمات از متغیرهای Render ====================
-TOKEN = os.environ.get("8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY")
-if not TOKEN:
-    print("خطا: مقدار BOT_TOKEN در Environment Variables تنظیم نشده است!", file=sys.stderr)
-
-BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Instadlmusicbot")
-SUPPORT_ID = os.environ.get("SUPPORT_ID", "@saeed_mz77")
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "@ainewss2026")
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "1773399042"))
-
-VIP_PRICE_TEXT = "ماهانه ۴۹ هزار تومان | دائمی ۹۹ هزار تومان"
-CARD_NUMBER = "۶۰۳۷-xxxx-xxxx-xxxx به نام شما"
+# ==================== تنظیمات مستقیم ربات ====================
+TOKEN = "8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY"
+BOT_USERNAME = "@Instadlmusicbot"
+SUPPORT_ID = "@saeed_mz77"
+CHANNEL_ID = "@ainewss2026"
+ADMIN_ID = 1773399042  # آیدی عددی شما
+VIP_PRICE_TEXT = "ماهانه 350 هزار تومان | دائمی 500 هزار تومان"
+CARD_NUMBER = "6219-8619-4353-1938 به نام سعید محمدزاده"
 # =========================================================================
 
 # دیتابیس کاربران
