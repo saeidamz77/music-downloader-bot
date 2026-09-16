@@ -2,3 +2,4 @@ python-telegram-bot
 yt-dlp
 shazamio
 beautifulsoup4
+requests
