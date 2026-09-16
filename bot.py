@@ -19,7 +19,7 @@ import yt_dlp
 from shazamio import Shazam
 
 # ==================== تنظیمات سرور و مدیریت ====================
-TOKEN = os.environ.get("8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY", "توکن_ربات")
+TOKEN = os.environ.get("8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY")
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "@Instadlmusicbot")
 SUPPORT_ID = os.environ.get("SUPPORT_ID", "@saeed_mz77")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "@ainewss2026")
