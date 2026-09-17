@@ -6,6 +6,9 @@ import glob
 import html
 import sqlite3
 import threading
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import quote, unquote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -96,29 +99,79 @@ def consume_credit(user_id: int) -> bool:
         return True
     return False
 
+def extract_telegram_channels(desc: str) -> list:
+    """استخراج آیدی کانال‌های تلگرامی معرفی شده در کپشن ریلز"""
+    if not desc:
+        return []
+    channels = []
+    # جستجوی لینک‌های t.me
+    tme_matches = re.findall(r'(?:https?://)?(?:t|telegram)\.me/([a-zA-Z0-9_]{4,})', desc)
+    channels.extend(tme_matches)
+    # جستجوی تگ‌های تلگرام در کپشن فارسی مثل (چنل تلگرام: @channel)
+    tg_mentions = re.findall(r'(?:کانال|چنل|تلگرام|telegram|channel)[\s\:\-]*@?([a-zA-Z0-9_]{4,})', desc, re.IGNORECASE)
+    channels.extend(tg_mentions)
+    return list(set(channels))
+
+def clean_to_original_song(raw_name: str) -> str:
+    """تبدیل عنوان ریمیکس به عنوان آهنگ اصلی خواننده (De-Remix)"""
+    if not raw_name: return ""
+    text = raw_name
+    # حذف واژه‌های ریمیکس و ادیت
+    remix_words = [
+        r'(?i)remix', r'(?i)slowed', r'(?i)reverb', r'(?i)sped up', r'(?i)bass boosted',
+        r'(?i)mashup', r'(?i)tiktok', r'(?i)instagram', r'(?i)dj\s+[a-zA-Z0-9_]+',
+        r'ریمیکس', r'تند شده', r'بیس دار', r'اهنگ چالش', r'آهنگ ریلز'
+    ]
+    for rw in remix_words:
+        text = re.sub(rw, ' ', text)
+
+    text = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', text)
+    text = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+', ' ', text)
+    text = re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', text)
+    return ' '.join(text.split())
+
 def extract_music_keywords(title: str, desc: str) -> list:
     full = f"{title or ''} {desc or ''}"
     candidates = []
 
-    # استخراج نام از عباراتی مثل موزیک: ... یا آهنگ: ...
+    # الگوهای پیدا کردن نام در متن کپشن
     found = re.findall(r'(?:موزیک|آهنگ|اهنگ|music|song|track)\s*[:：\-]?\s*([^\n\r#@]+)', full, re.IGNORECASE)
     for f in found:
-        cleaned = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+|[\(\[\{].*?[\)\]\}]', ' ', f)
-        cleaned = ' '.join(re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', cleaned).split())
+        cleaned = clean_to_original_song(f)
         if len(cleaned) > 2:
             candidates.append(cleaned)
 
-    # پاکسازی عنوان ریلز
-    raw_clean = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+|(?i)(video by|reel by|audio by|original audio|insta|clip|ریلز|پست)', ' ', full.split('\n')[0])
-    raw_clean = ' '.join(re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', raw_clean).split())
-    if len(raw_clean) > 2:
-        candidates.append(raw_clean)
+    # عنوان خط اول
+    raw_first = full.split('\n')[0]
+    cleaned_first = clean_to_original_song(raw_first)
+    if len(cleaned_first) > 2:
+        candidates.append(cleaned_first)
 
-    res = []
+    # حذف موارد تکراری
+    unique = []
     for c in candidates:
-        if c not in res:
-            res.append(c)
-    return res
+        if c not in unique:
+            unique.append(c)
+    return unique
+
+# بررسی و جستجو در پست‌های وب تلگرام
+def search_telegram_channel_web(channel_username: str, keywords: list) -> str:
+    try:
+        url = f"https://t.me/s/{channel_username.replace('@', '')}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=8)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            # استخراج آخرین پیام‌های حاوی فایل صوتی یا متن موزیک
+            messages = soup.find_all('div', class_='tgme_widget_message_text')
+            for m in reversed(messages):
+                m_text = m.get_text()
+                for kw in keywords:
+                    if kw.lower() in m_text.lower():
+                        return kw
+    except Exception:
+        pass
+    return ""
 
 # ==================== پنل مدیریت ====================
 async def show_admin_panel(message_target):
@@ -172,11 +225,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        "👑 <b>ربات هوشمند دانلود آهنگ اصلی ریلز</b>\n\n"
-        "⚡️ <b>امکانات:</b>\n"
-        "- ارسال لینک ریلز برای استخراج و دانلود آهنگ اصلی و کامل\n"
-        "- دانلود ویدیوی باکیفیت و استخراج صدای کلیپ\n"
-        "- جستجوی مستقیم نام آهنگ یا خواننده"
+        "👑 <b>ربات هوشمند دانلود آهنگ اصلی ریلز (بدون ریمیکس و نسخه کامل)</b>\n\n"
+        "⚡️ <b>قابلیت‌ها:</b>\n"
+        "- ارسال لینک ریلز اینستاگرام یا یوتیوب برای دانلود آهنگ اورجینال خواننده\n"
+        "- شناسایی کانال تلگرام ذکر شده در کپشن ریلز و تطبیق موزیک\n"
+        "- دانلود مستقیم ویدیوی کامل ریلز یا استخراج صدای خالص"
     )
     kb = [
         [InlineKeyboardButton("👤 حساب کاربری و زیرمجموعه", callback_data="user_panel")],
@@ -291,15 +344,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['media_url'] = text
             credit_txt = "نامحدود (VIP)" if is_vip else f"{req_left} عدد"
             menu_text = (
-                "🎯 <b>رسانه دریافت شد</b>\n"
+                "🎯 <b>رسانه شناسایی شد</b>\n"
                 f"وضعیت اعتبار: <code>{credit_txt}</code>\n"
                 "-------------------\n"
                 "گزینه مدنظر خود را انتخاب فرمایید:"
             )
             buttons = [
-                [InlineKeyboardButton("🔥 دریافت موزیک کامل ۳۲۰ (نسخه اصلی)", callback_data="get_guaranteed_full_music")],
-                [InlineKeyboardButton("🎥 دانلود ویدیوی ریلز (MP4)", callback_data="get_full_video")],
-                [InlineKeyboardButton("🎵 صدای اصلی کلیپ", callback_data="get_clip_audio")]
+                [InlineKeyboardButton("🔥 پیدا کردن و دانلود نسخه اصلی خواننده (۳۲۰)", callback_data="get_original_full_music")],
+                [InlineKeyboardButton("🎥 دانلود ویدیوی کامل ریلز (MP4)", callback_data="get_full_video")],
+                [InlineKeyboardButton("🎵 استخراج مستقیم صدای کلیپ", callback_data="get_clip_audio")]
             ]
             await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         else:
@@ -435,14 +488,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(panel_text, parse_mode="HTML")
         return
 
-    # استخراج هوشمند و بدون تکرار آهنگ
-    if data == "get_guaranteed_full_music":
+    # موتور استخراج آهنگ اصلی و De-Remix
+    if data == "get_original_full_music":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما به پایان رسیده است.")
             return
 
         url = context.user_data.get('media_url')
-        status = await query.edit_message_text("🔍 <b>در حال تحلیل اثر صوتی برای یافتن نسخه اصلی...</b>", parse_mode="HTML")
+        status = await query.edit_message_text("🔍 <b>در حال تحلیل صدا، کپشن و چنل‌های متصل...</b>", parse_mode="HTML")
 
         uid = uuid.uuid4().hex[:6]
         prefix = f"raw_{uid}"
@@ -468,7 +521,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             raw_file = get_output_file(prefix)
 
-            # ۱. اولویت اول: تحلیل اثر انگشت صوتی با شازام
+            # ۱. شازام با حذف اثر ریمیکس
             if raw_file:
                 os.system(f"ffmpeg -y -i {raw_file} -ss 00:00:03 -t 15 -acodec copy {sample_cut} >/dev/null 2>&1")
                 test_audio = sample_cut if os.path.exists(sample_cut) else raw_file
@@ -476,40 +529,50 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     res = await shazam.recognize(test_audio)
                     track = res.get('track') if res else None
                     if track:
-                        stitle = track.get('title', '')
-                        sartist = track.get('subtitle', '')
-                        queries_to_try.append(f"{sartist} {stitle}".strip())
+                        stitle = clean_to_original_song(track.get('title', ''))
+                        sartist = clean_to_original_song(track.get('subtitle', ''))
+                        if stitle:
+                            queries_to_try.append(f"{sartist} {stitle}".strip())
                 except Exception:
                     pass
 
-            # ۲. بررسی تگ‌های متادیتای رسمی ریلز
-            if artist_tag and track_tag:
-                queries_to_try.append(f"{artist_tag} {track_tag}")
+            # ۲. بررسی کانال‌های تلگرامی ذکرشده در کپشن
+            tg_channels = extract_telegram_channels(meta_desc)
+            if tg_channels:
+                clean_keywords = extract_music_keywords(meta_title, meta_desc)
+                for ch in tg_channels[:2]:
+                    found_in_tg = search_telegram_channel_web(ch, clean_keywords)
+                    if found_in_tg:
+                        queries_to_try.insert(0, found_in_tg)
 
-            # ۳. استخراج نام از کپشن
-            extracted_words = extract_music_keywords(meta_title, meta_desc)
-            queries_to_try.extend(extracted_words)
+            # ۳. بررسی متادیتای تگ‌شده ریلز
+            if artist_tag and track_tag:
+                queries_to_try.append(clean_to_original_song(f"{artist_tag} {track_tag}"))
+
+            # ۴. بررسی کلمات کلیدی کپشن
+            caption_words = extract_music_keywords(meta_title, meta_desc)
+            queries_to_try.extend(caption_words)
 
             sent_full = False
             for target_query in queries_to_try:
                 if not target_query or len(target_query) < 3:
                     continue
-                await status.edit_text(f"🔍 <b>یافتن قطعه اصلی:</b>\n<code>{html.escape(target_query)}</code>...", parse_mode="HTML")
+                await status.edit_text(f"🔍 <b>یافتن نسخه اصلی خواننده:</b>\n<code>{html.escape(target_query)}</code>...", parse_mode="HTML")
                 sent_full = await download_original_track(target_query, query.message.chat_id, context, status)
                 if sent_full:
                     break
 
-            # ۴. در صورت نیافتن، ارسال صدای اصلی و بدون هیچ‌گونه تکرار (Natural Audio)
+            # ۵. در صورت نیافتن، ارسال صدای خود ریلز با کیفیت ۳۲۰
             if not sent_full and raw_file and os.path.exists(raw_file):
-                await status.edit_text("⚡️ <i>ارسال صدای باکیفیت و اصلی ریلز...</i>", parse_mode="HTML")
-                display_title = queries_to_try[0] if queries_to_try else "Reel Original Sound"
+                await status.edit_text("⚡️ <i>نسخه رسمی جداگانه منتشر نشده؛ ارسال صدای باکیفیت خود کلیپ...</i>", parse_mode="HTML")
+                display_title = queries_to_try[0] if queries_to_try else "Reel Sound"
                 with open(raw_file, 'rb') as f:
                     await context.bot.send_audio(
                         chat_id=query.message.chat_id,
                         audio=f,
                         title=display_title,
-                        performer="Original Sound",
-                        caption=f"🎵 <b>صدای اصلی استخراج‌شده (کیفیت ۳۲۰)</b>\n🤖 {BOT_USERNAME}",
+                        performer="Original Reel Sound",
+                        caption=f"🎵 <b>صدای استخراج‌شده با کیفیت ۳۲۰</b>\n🤖 {BOT_USERNAME}",
                         parse_mode="HTML",
                         read_timeout=300,
                         write_timeout=300
@@ -562,7 +625,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = await query.message.reply_text("در حال ارسال فایل...", parse_mode="HTML")
         await process_direct_media(target_url, is_video, query.message.chat_id, context, status)
 
-# تابع دانلود موزیک واقعی (بدون لوپ و بدون تکرار)
+# تابع دانلود مستقیم نسخه اصلی آهنگ خواننده
 async def download_original_track(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
     uid = uuid.uuid4().hex[:8]
     prefix = f"full_{uid}"
@@ -573,8 +636,10 @@ async def download_original_track(query_text: str, chat_id: int, context: Contex
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
     }
 
+    # اولویت: نسخه اصلی، رسمی و بدون پسوند ریمیکس
     search_variants = [
         f"{query_text} official audio",
+        f"{query_text} آهنگ اصلی",
         f"{query_text}"
     ]
 
@@ -587,8 +652,7 @@ async def download_original_track(query_text: str, chat_id: int, context: Contex
             best_entry = None
             for e in entries:
                 dur = e.get('duration', 0)
-                # اطمینان از اینکه فایل یک ترانه معتبر و کامل است (بالای ۴۵ ثانیه)
-                if dur and dur >= 45:
+                if dur and dur >= 50:
                     best_entry = e
                     break
 
@@ -605,7 +669,7 @@ async def download_original_track(query_text: str, chat_id: int, context: Contex
                     caption = (
                         f"🎵 <b>{html.escape(title)}</b>\n"
                         f"👤 <code>{html.escape(uploader)}</code>\n"
-                        f"🔥 <b>نسخه اصلی و باکیفیت ۳۲۰</b>\n"
+                        f"🔥 <b>نسخه کامل و اورجینال خواننده (۳۲۰)</b>\n"
                         f"🤖 {BOT_USERNAME}"
                     )
                     with open(out_file, 'rb') as f:
@@ -662,7 +726,7 @@ async def process_direct_media(target_url, is_video, chat_id, context, status_ms
     finally:
         clean_files(prefix)
 
-# وب‌سرور سبک برای Render
+# وب‌سرور سبک جهت پورت رندر
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -691,5 +755,5 @@ app.add_handler(CommandHandler("panel", admin_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با موتور استخراج نسخه اصلی (بدون لوپ و تکرار) فعال شد...")
+print("ربات با قابلیت De-Remix، رصد کانال‌های تلگرام و دانلود نسخه اصلی فعال شد...")
 app.run_polling()
