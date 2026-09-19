@@ -6,6 +6,7 @@ import glob
 import html
 import sqlite3
 import threading
+import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -45,15 +46,18 @@ conn.commit()
 
 shazam = Shazam()
 
-# تنظیمات کلاینت ضدبلاک یوتیوب
-YTDL_ANTI_BLOCK_ARGS = {
+# هدرها و کلاینت‌های ضدبلاک اختصاصی برای یوتیوب و اینستاگرام
+ANTI_BLOCK_CONFIG = {
     'extractor_args': {
         'youtube': {
             'player_client': ['android', 'ios']
+        },
+        'instagram': {
+            'api_client': ['web', 'graph']
         }
     },
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
         'Accept-Language': 'en-US,en;q=0.9',
     }
 }
@@ -138,6 +142,37 @@ def extract_music_keywords(title: str, desc: str) -> list:
             unique.append(c)
     return unique
 
+# ==================== موتور دانلود کمکی اینستاگرام (Fallback) ====================
+def download_instagram_fallback(url: str, output_path: str) -> bool:
+    """دریافت مستقیم در صورت بلاک شدن توسط سرور اینستاگرام"""
+    api_endpoints = [
+        "https://api.cobalt.tools/api/json",
+        "https://co.wuk.sh/api/json"
+    ]
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
+    payload = {"url": url, "downloadMode": "audio"}
+
+    for endpoint in api_endpoints:
+        try:
+            res = requests.post(endpoint, json=payload, headers=headers, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                stream_url = data.get("url")
+                if stream_url:
+                    r = requests.get(stream_url, stream=True, timeout=25)
+                    if r.status_code == 200:
+                        with open(output_path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=16384):
+                                if chunk: f.write(chunk)
+                        return True
+        except Exception:
+            continue
+    return False
+
 # ==================== پنل مدیریت ====================
 async def show_admin_panel(message_target):
     cursor.execute("SELECT COUNT(*) FROM users")
@@ -190,11 +225,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        "🎧 <b>ربات هوشمند دانلود و استخراج موزیک ۳۲۰</b>\n\n"
+        "👑 <b>ربات پیشرفته دانلود و استخراج کامل موزیک ۳۲۰</b>\n\n"
         "⚡️ <b>قابلیت‌ها:</b>\n"
-        "- ارسال لینک ریلز برای استخراج و دانلود قطعه کامل با کیفیت ۳۲۰\n"
-        "- مجهز به کلاینت‌های ضدبلاک یوتیوب جهت جلوگیری از خطای پلیر\n"
-        "- جستجوی مستقیم متنی یا استخراج فایل صوتی و ویدیویی"
+        "- مجهز به سیستم ضدبلاک یوتیوب و اسکرپر هوشمند اینستاگرام\n"
+        "- استخراج دقیق آهنگ کامل حتی در صورت ارور دادن ریلز\n"
+        "- دانلود مستقیم ویدیوی باکیفیت و استخراج صدای اصلی"
     )
     kb = [
         [InlineKeyboardButton("👤 حساب کاربری", callback_data="user_panel")],
@@ -252,9 +287,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 get_or_create_user(target_uid)
                 cursor.execute("UPDATE users SET requests_left = requests_left + ? WHERE user_id = ?", (amount, target_uid))
                 conn.commit()
-                await update.message.reply_text(f"✅ تعداد {amount} اعتبار به کاربر <code>{target_uid}</code> اضافه شد.", parse_mode="HTML")
+                await update.message.reply_text(f"✅ تعداد {amount} اعتبار به کاربر <code>{target_uid}</code> افزوده شد.", parse_mode="HTML")
             except Exception:
-                await update.message.reply_text("❌ مثال صحیح: <code>1773399042 10</code>", parse_mode="HTML")
+                await update.message.reply_text("❌ فرمت صحیح: <code>1773399042 10</code>", parse_mode="HTML")
             await show_admin_panel(update.message)
             return
 
@@ -270,7 +305,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sent_count += 1
                 except Exception:
                     pass
-            await status_msg.edit_text(f"📢 پیام به <b>{sent_count}</b> کاربر ارسال شد.", parse_mode="HTML")
+            await status_msg.edit_text(f"📢 پیام به <b>{sent_count}</b> کاربر با موفقیت ارسال شد.", parse_mode="HTML")
             await show_admin_panel(update.message)
             return
 
@@ -319,10 +354,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("لطفاً لینک یوتیوب یا اینستاگرام ارسال کنید.")
         return
 
-    # جستجوی متنی
+    # جستجوی متنی با کلاینت‌های ضدبلاک
     search_msg = await update.message.reply_text(f"🔍 در حال جستجوی «{html.escape(text)}»...", parse_mode="HTML")
     ydl_opts = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
-    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+    ydl_opts.update(ANTI_BLOCK_CONFIG)
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             res = ydl.extract_info(f"ytsearch5:{text}", download=False)
@@ -449,37 +484,46 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(panel_text, parse_mode="HTML")
         return
 
-    # استخراج قطعی آهنگ با کلاینت‌های ضدبلاک
+    # پردازش عمیق و ضدبلاک برای استخراج ریلز و آهنگ کامل
     if data == "deep_universal_music":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما به پایان رسیده است.")
             return
 
         url = context.user_data.get('media_url')
-        status = await query.edit_message_text("🔍 <b>در حال کاوش فرکانسی و آنالیز اثر...</b>", parse_mode="HTML")
+        status = await query.edit_message_text("🔍 <b>در حال کاوش فرکانسی و آنالیز اثر (ضدبلاک)...</b>", parse_mode="HTML")
 
         uid = uuid.uuid4().hex[:6]
         prefix = f"raw_{uid}"
         sample_cut = f"cut_{uid}.mp3"
+        fallback_file = f"{prefix}.mp3"
+
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f"{prefix}.%(ext)s",
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
             'quiet': True,
         }
-        ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+        ydl_opts.update(ANTI_BLOCK_CONFIG)
 
         search_pool = []
         meta_title = ""
         meta_desc = ""
 
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                meta_title = info.get('title', '')
-                meta_desc = info.get('description', '')
-                track_tag = info.get('track', '')
-                artist_tag = info.get('artist', '')
+            # تلاش ۱: دانلود با yt-dlp و هدرهای ضدبلاک
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    meta_title = info.get('title', '')
+                    meta_desc = info.get('description', '')
+                    track_tag = info.get('track', '')
+                    artist_tag = info.get('artist', '')
+                    if artist_tag and track_tag:
+                        search_pool.append(f"{artist_tag} {track_tag}")
+            except Exception:
+                # تلاش ۲ (دور زدن ارور empty media response): استفاده از API کمکی اینستاگرام
+                download_instagram_fallback(url, fallback_file)
 
             raw_file = get_output_file(prefix)
 
@@ -494,31 +538,27 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         stitle = clean_song_query(track.get('title', ''))
                         sartist = clean_song_query(track.get('subtitle', ''))
                         if stitle:
-                            search_pool.append(f"{sartist} {stitle}".strip())
+                            search_pool.insert(0, f"{sartist} {stitle}".strip())
                 except Exception:
                     pass
 
-            # ۲. بررسی متادیتای اختصاصی تگ‌شده
-            if artist_tag and track_tag:
-                search_pool.append(f"{artist_tag} {track_tag}")
-
-            # ۳. استخراج کلمات کلیدی از کپشن
+            # ۲. بررسی کلمات کلیدی کپشن
             caption_words = extract_music_keywords(meta_title, meta_desc)
             search_pool.extend(caption_words)
 
             download_success = False
 
-            # ۴. جستجوی دقیق نسخه ۳۲۰ با کلاینت‌های ضدبلاک
+            # ۳. جستجوی نسخه استودیویی ۳۲۰ در یوتیوب با کلاینت اندروید
             for target_query in search_pool:
                 if not target_query or len(target_query) < 3:
                     continue
 
-                await status.edit_text(f"🌐 <b>جستجوی نسخه ۳۲۰:</b>\n<code>{html.escape(target_query)}</code>...", parse_mode="HTML")
+                await status.edit_text(f"🌐 <b>در حال دانلود قطعه اصلی ۳۲۰:</b>\n<code>{html.escape(target_query)}</code>...", parse_mode="HTML")
                 download_success = await execute_safe_download_and_send(target_query, query.message.chat_id, context, status)
                 if download_success:
                     break
 
-            # ۵. چاره نهایی: ارسال صدای باکیفیت خود ریلز در صورت نیافتن نسخه مجزا
+            # ۴. اگر نسخه مجزایی نبود، صدای شفاف خود کلیپ را ارسال می‌کند
             if not download_success and raw_file and os.path.exists(raw_file):
                 await status.edit_text("⚡️ <i>نسخه کامل مجزا منتشر نشده؛ ارسال صدای باکیفیت خود کلیپ...</i>", parse_mode="HTML")
                 display_title = search_pool[0] if search_pool else "Original Track"
@@ -581,7 +621,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = await query.message.reply_text("در حال ارسال فایل...", parse_mode="HTML")
         await process_direct_media(target_url, is_video, query.message.chat_id, context, status)
 
-# تابع دانلود مجهز به کلاینت‌های ضدبلاک یوتیوب
 async def execute_safe_download_and_send(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
     uid = uuid.uuid4().hex[:8]
     prefix = f"safe_{uid}"
@@ -592,7 +631,7 @@ async def execute_safe_download_and_send(query_text: str, chat_id: int, context:
         'quiet': True,
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
     }
-    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+    ydl_opts.update(ANTI_BLOCK_CONFIG)
 
     search_queries = [
         f"{query_text} official audio",
@@ -602,7 +641,7 @@ async def execute_safe_download_and_send(query_text: str, chat_id: int, context:
     for sq in search_queries:
         try:
             search_opts = {'quiet': True}
-            search_opts.update(YTDL_ANTI_BLOCK_ARGS)
+            search_opts.update(ANTI_BLOCK_CONFIG)
 
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 res = ydl.extract_info(f"ytsearch3:{sq}", download=False)
@@ -657,7 +696,7 @@ async def process_direct_media(target_url, is_video, chat_id, context, status_ms
     uid = uuid.uuid4().hex[:8]
     prefix = f"direct_{uid}"
     ydl_opts = {'outtmpl': f"{prefix}.%(ext)s", 'max_filesize': 50 * 1024 * 1024, 'quiet': True}
-    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+    ydl_opts.update(ANTI_BLOCK_CONFIG)
 
     if not is_video:
         ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}]})
@@ -716,5 +755,5 @@ app.add_handler(CommandHandler("panel", admin_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با معماری ضدبلاک یوتیوب و پنل مدیریت فعال شد...")
+print("ربات با معماری ضدبلاک اینستاگرام و یوتیوب فعال شد...")
 app.run_polling()
