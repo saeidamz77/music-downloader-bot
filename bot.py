@@ -19,7 +19,7 @@ from telegram.ext import (
 import yt_dlp
 from shazamio import Shazam
 
-# ==================== تنظیمات دستی و مستقیم ====================
+# ==================== تنظیمات سرور و مدیریت ====================
 TOKEN = os.environ.get("BOT_TOKEN") or "8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY"
 BOT_USERNAME = os.environ.get("BOT_USERNAME") or "@Instadlmusicbot"
 SUPPORT_ID = "@saeed_mz77"
@@ -27,7 +27,7 @@ CHANNEL_ID = os.environ.get("CHANNEL_ID") or "@ainewss2026"
 ADMIN_ID = int(os.environ.get("ADMIN_ID") or "1773399042")
 
 VIP_PRICE_TEXT = "ماهانه 350 هزار تومان | دائمی 500 هزار تومان"
-CARD_NUMBER = "6219-8619-4353-1938 به نام  سعید محمدزاده"
+CARD_NUMBER = "6219-8619-4353-1938 به نام سعید محمدزاده"
 # ==============================================================
 
 conn = sqlite3.connect("bot_database.db", check_same_thread=False)
@@ -44,6 +44,19 @@ CREATE TABLE IF NOT EXISTS users (
 conn.commit()
 
 shazam = Shazam()
+
+# تنظیمات کلاینت ضدبلاک یوتیوب
+YTDL_ANTI_BLOCK_ARGS = {
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'ios']
+        }
+    },
+    'http_headers': {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+}
 
 def get_or_create_user(user_id, referrer_id=None):
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -98,10 +111,9 @@ def consume_credit(user_id: int) -> bool:
     return False
 
 def clean_song_query(text: str) -> str:
-    """استخراج دقیق عنوان آهنگ بدون زوائد اینستاگرام"""
     if not text: return ""
     clean = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+', ' ', text)
-    clean = re.sub(r'(?i)(video by|reel by|audio by|original audio|insta|clip|ریلز|پست)', ' ', clean)
+    clean = re.sub(r'(?i)(video by|reel by|audio by|original audio|remix|slowed|reverb|insta|clip|ریلز|پست)', ' ', clean)
     clean = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', clean)
     clean = re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', clean)
     return ' '.join(clean.split())
@@ -139,7 +151,7 @@ async def show_admin_panel(message_target):
         f"👥 کل کاربران: <code>{total_users} نفر</code>\n"
         f"⭐️ کاربران VIP: <code>{vip_users} نفر</code>\n"
         "-------------------\n"
-        "یک بخش را انتخاب فرمایید:"
+        "یک بخش را جهت مدیریت انتخاب کنید:"
     )
     kb = [
         [InlineKeyboardButton("📊 آمار دقیق کاربران", callback_data="admin_stats")],
@@ -174,16 +186,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📢 ورود و عضویت در کانال", url=channel_link)],
             [InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_join")]
         ]
-        await update.message.reply_text("<b>برای فعال‌سازی ربات، ابتدا عضو کانال شوید:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+        await update.message.reply_text("<b>برای فعال‌سازی ربات، لطفاً ابتدا در کانال عضو شوید:</b>", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     welcome_text = (
-        "🎧 <b>به ربات هوشمند های موزیک خوش آمدید</b>\n\n"
-        "⚡️ <b>روش‌های سریع پیدا کردن و دانلود آهنگ:</b>\n"
-        "▫️ لینک ریلز اینستاگرام یا یوتیوب را بفرستید تا دقیق‌ترین نسخه‌های کامل پیدا شوند.\n"
-        "▫️ ویس یا فایل ویدیویی بفرستید تا امواج صوتی شناسایی شود.\n"
-        "▫️ نام آهنگ یا تکه‌ای از متن ترانه را بنویسید.\n\n"
-        "✨ <i>لینک ریلز یا نام آهنگ را بفرستید:</i>"
+        "🎧 <b>ربات هوشمند دانلود و استخراج موزیک ۳۲۰</b>\n\n"
+        "⚡️ <b>قابلیت‌ها:</b>\n"
+        "- ارسال لینک ریلز برای استخراج و دانلود قطعه کامل با کیفیت ۳۲۰\n"
+        "- مجهز به کلاینت‌های ضدبلاک یوتیوب جهت جلوگیری از خطای پلیر\n"
+        "- جستجوی مستقیم متنی یا استخراج فایل صوتی و ویدیویی"
     )
     kb = [
         [InlineKeyboardButton("👤 حساب کاربری", callback_data="user_panel")],
@@ -216,7 +227,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn.commit()
                 await update.message.reply_text(f"✅ کاربر <code>{target_uid}</code> به کاربر VIP ارتقا یافت.", parse_mode="HTML")
             except ValueError:
-                await update.message.reply_text("❌ لطفاً شناسه عددی ارسال کنید.")
+                await update.message.reply_text("❌ شناسه باید فقط عدد باشد.")
             await show_admin_panel(update.message)
             return
 
@@ -226,9 +237,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 target_uid = int(text_input)
                 cursor.execute("UPDATE users SET is_vip = 0 WHERE user_id = ?", (target_uid,))
                 conn.commit()
-                await update.message.reply_text(f"✅ اشتراک VIP کاربر <code>{target_uid}</code> لغو شد.", parse_mode="HTML")
+                await update.message.reply_text(f"✅ دسترسی VIP کاربر <code>{target_uid}</code> لغو شد.", parse_mode="HTML")
             except ValueError:
-                await update.message.reply_text("❌ لطفاً شناسه عددی ارسال کنید.")
+                await update.message.reply_text("❌ شناسه باید فقط عدد باشد.")
             await show_admin_panel(update.message)
             return
 
@@ -278,7 +289,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         invite_link = f"https://t.me/{bot_user}?start={user_id}"
         msg = (
             "🔒 <b>اعتبار رایگان شما به پایان رسیده است!</b>\n\n"
-            "برای دریافت اعتبار، لینک زیر را به دوستان بفرستید (هر دعوت = ۳ دانلود رایگان):\n"
+            "برای دریافت اعتبار، لینک زیر را برای دوستان خود بفرستید:\n"
             f"<code>{invite_link}</code>\n\n"
             "یا اشتراک VIP تهیه فرمایید."
         )
@@ -288,61 +299,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
-    # اگر لینک ریلز یا یوتیوب باشد
     if is_link(text):
         if any(d in text for d in ["instagram.com", "youtube.com", "youtu.be"]):
             context.user_data['media_url'] = text
             credit_txt = "نامحدود (VIP)" if is_vip else f"{req_left} عدد"
             menu_text = (
                 "🎯 <b>رسانه دریافت شد</b>\n"
-                f"📊 اعتبار شما: <code>{credit_txt}</code>\n"
+                f"وضعیت اعتبار: <code>{credit_txt}</code>\n"
                 "-------------------\n"
-                "لطفاً عملیات مورد نظر را انتخاب فرمایید:"
+                "گزینه مدنظر را انتخاب کنید:"
             )
             buttons = [
-                [InlineKeyboardButton("🔥 پیدا کردن و دانلود نسخه کامل ۳۲۰ (موتور های‌موزیک)", callback_data="himusic_style_search")],
+                [InlineKeyboardButton("🔥 پیدا کردن و دانلود نسخه ۳۲۰ (موتور ضدبلاک)", callback_data="deep_universal_music")],
                 [InlineKeyboardButton("🎥 دانلود ویدیوی کامل ریلز (MP4)", callback_data="get_full_video")],
-                [InlineKeyboardButton("🎵 فقط صدای اصلی کلیپ", callback_data="get_clip_audio")]
+                [InlineKeyboardButton("🎵 صدای اصلی کلیپ", callback_data="get_clip_audio")]
             ]
             await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
         else:
-            await update.message.reply_text("لطفاً لینک یوتیوب یا اینستاگرام ارسال فرمایید.")
+            await update.message.reply_text("لطفاً لینک یوتیوب یا اینستاگرام ارسال کنید.")
         return
 
-    # جستجوی متنی نام موزیک
-    await execute_himusic_text_search(text, update.message, context)
-
-# تابع جستجوی متنی دقیق سبک HiMusic
-async def execute_himusic_text_search(query_str: str, message_obj, context: ContextTypes.DEFAULT_TYPE):
-    status = await message_obj.reply_text(f"🔍 <b>در حال جستجوی قطعه «{html.escape(query_str)}»...</b>", parse_mode="HTML")
+    # جستجوی متنی
+    search_msg = await update.message.reply_text(f"🔍 در حال جستجوی «{html.escape(text)}»...", parse_mode="HTML")
     ydl_opts = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
+    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            res = ydl.extract_info(f"ytsearch5:{query_str}", download=False)
-            entries = res.get('entries', [])
+            res = ydl.extract_info(f"ytsearch5:{text}", download=False)
+            tracks = res.get('entries', [])
 
-        valid_tracks = [e for e in entries if e.get('duration', 0) >= 40]
-        if not valid_tracks:
-            await status.edit_text("❌ نتیجه‌ای با این عنوان یافت نشد.")
+        if not tracks:
+            await search_msg.edit_text("❌ قطعه‌ای یافت نشد.")
             return
 
-        context.user_data['search_results'] = {str(i): t for i, t in enumerate(valid_tracks)}
-        list_text = (
-            f"🎵 <b>نتایج یافت‌شده برای:</b> <code>{html.escape(query_str)}</code>\n"
-            "-------------------\n"
-            "جهت دانلود نسخه ۳۲۰ روی موزیک مورد نظر کلیک کنید:\n\n"
-        )
+        context.user_data['tracks'] = {str(i): t for i, t in enumerate(tracks)}
+        list_text = "🎵 <b>نتایج پیدا شد؛ قطعه را انتخاب کنید:</b>\n-------------------\n"
         buttons = []
-        for i, t in enumerate(valid_tracks):
+        for i, t in enumerate(tracks):
             title = t.get('title', 'Unknown')[:35]
             dur = t.get('duration_string', '--:--')
-            uploader = t.get('uploader', 'Artist')[:15]
-            list_text += f"{i+1}. <b>{html.escape(title)}</b>\n👤 {html.escape(uploader)} | ⏱ {dur}\n\n"
-            buttons.append([InlineKeyboardButton(f"🎶 {i+1}. {title}", callback_data=f"himusic_dl_{i}")])
+            list_text += f"{i+1}. <b>{html.escape(title)}</b> [<code>{dur}</code>]\n"
+            buttons.append([InlineKeyboardButton(f"{i+1}. {title}", callback_data=f"select_{i}")])
 
-        await status.edit_text(list_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+        await search_msg.edit_text(list_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        await status.edit_text(f"خطا در جستجو: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
+        await search_msg.edit_text(f"خطا در جستجو: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -407,7 +408,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "check_join":
         if await check_membership(user_id, context):
             await query.message.delete()
-            await query.message.reply_text("عضویت تأیید شد! اکنون می‌توانید لینک یا نام آهنگ را بفرستید.")
+            await query.message.reply_text("عضویت تأیید شد! اکنون می‌توانید لینک یا ویدیو بفرستید.")
         else:
             await query.answer("هنوز عضو کانال نشده‌اید!", show_alert=True)
         return
@@ -443,22 +444,22 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"وضعیت: <code>{'VIP' if is_vip else 'عادی'}</code>\n"
             f"اعتبار دانلود: <code>{req_left if not is_vip else 'نامحدود'}</code>\n"
             f"تعداد دعوت‌ها: <code>{inv_count} نفر</code>\n\n"
-            f"🔗 لینک دعوت شما (هر نفر = ۳ دانلود هدیه):\n<code>{invite_link}</code>"
+            f"🔗 لینک دعوت شما:\n<code>{invite_link}</code>"
         )
         await query.message.reply_text(panel_text, parse_mode="HTML")
         return
 
-    # موتور کاوش ریلز به سبک های‌موزیک
-    if data == "himusic_style_search":
+    # استخراج قطعی آهنگ با کلاینت‌های ضدبلاک
+    if data == "deep_universal_music":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما به پایان رسیده است.")
             return
 
         url = context.user_data.get('media_url')
-        status = await query.edit_message_text("🔍 <b>در حال تحلیل صدا و اسکن دقیق عنوان...</b>", parse_mode="HTML")
+        status = await query.edit_message_text("🔍 <b>در حال کاوش فرکانسی و آنالیز اثر...</b>", parse_mode="HTML")
 
         uid = uuid.uuid4().hex[:6]
-        prefix = f"scan_{uid}"
+        prefix = f"raw_{uid}"
         sample_cut = f"cut_{uid}.mp3"
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -466,8 +467,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
             'quiet': True,
         }
+        ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
 
-        detected_queries = []
+        search_pool = []
         meta_title = ""
         meta_desc = ""
 
@@ -481,7 +483,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             raw_file = get_output_file(prefix)
 
-            # ۱. شازام
+            # ۱. تحلیل اثر انگشت صوتی با Shazam
             if raw_file:
                 os.system(f"ffmpeg -y -i {raw_file} -ss 00:00:03 -t 15 -acodec copy {sample_cut} >/dev/null 2>&1")
                 test_audio = sample_cut if os.path.exists(sample_cut) else raw_file
@@ -492,58 +494,41 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         stitle = clean_song_query(track.get('title', ''))
                         sartist = clean_song_query(track.get('subtitle', ''))
                         if stitle:
-                            detected_queries.append(f"{sartist} {stitle}".strip())
+                            search_pool.append(f"{sartist} {stitle}".strip())
                 except Exception:
                     pass
 
-            # ۲. بررسی متادیتای تگ‌شده
+            # ۲. بررسی متادیتای اختصاصی تگ‌شده
             if artist_tag and track_tag:
-                detected_queries.append(f"{artist_tag} {track_tag}")
+                search_pool.append(f"{artist_tag} {track_tag}")
 
-            # ۳. استخراج از کپشن
+            # ۳. استخراج کلمات کلیدی از کپشن
             caption_words = extract_music_keywords(meta_title, meta_desc)
-            detected_queries.extend(caption_words)
+            search_pool.extend(caption_words)
 
-            target_song = detected_queries[0] if detected_queries else None
+            download_success = False
 
-            if target_song:
-                # جستجو و ارائه لیست سبک های‌موزیک
-                ydl_search = {'format': 'bestaudio/best', 'noplaylist': True, 'quiet': True}
-                with yt_dlp.YoutubeDL(ydl_search) as ydl:
-                    res = ydl.extract_info(f"ytsearch4:{target_song}", download=False)
-                    tracks = res.get('entries', [])
+            # ۴. جستجوی دقیق نسخه ۳۲۰ با کلاینت‌های ضدبلاک
+            for target_query in search_pool:
+                if not target_query or len(target_query) < 3:
+                    continue
 
-                valid_tracks = [t for t in tracks if t.get('duration', 0) >= 40]
+                await status.edit_text(f"🌐 <b>جستجوی نسخه ۳۲۰:</b>\n<code>{html.escape(target_query)}</code>...", parse_mode="HTML")
+                download_success = await execute_safe_download_and_send(target_query, query.message.chat_id, context, status)
+                if download_success:
+                    break
 
-                if valid_tracks:
-                    context.user_data['search_results'] = {str(i): t for i, t in enumerate(valid_tracks)}
-                    list_text = (
-                        f"🎯 <b>موزیک ریلز شناسایی شد:</b> <code>{html.escape(target_song)}</code>\n"
-                        "-------------------\n"
-                        "نسخه مورد نظر را جهت دریافت انتخاب فرمایید:\n\n"
-                    )
-                    buttons = []
-                    for i, t in enumerate(valid_tracks):
-                        title = t.get('title', 'Unknown')[:35]
-                        dur = t.get('duration_string', '--:--')
-                        uploader = t.get('uploader', 'Artist')[:15]
-                        list_text += f"{i+1}. <b>{html.escape(title)}</b>\n👤 {html.escape(uploader)} | ⏱ {dur}\n\n"
-                        buttons.append([InlineKeyboardButton(f"🎶 {i+1}. {title}", callback_data=f"himusic_dl_{i}")])
-
-                    await status.edit_text(list_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
-                    return
-
-            # در صورتی که در دیتابیس‌ها نسخه دیگری نبود، ارسال صدای باکیفیت خود ریلز
-            if raw_file and os.path.exists(raw_file):
-                await status.edit_text("⚡️ <i>نسخه رسمی جداگانه منتشر نشده؛ در حال ارسال صدای باکیفیت خود کلیپ...</i>", parse_mode="HTML")
-                display_title = detected_queries[0] if detected_queries else "Reel Audio"
+            # ۵. چاره نهایی: ارسال صدای باکیفیت خود ریلز در صورت نیافتن نسخه مجزا
+            if not download_success and raw_file and os.path.exists(raw_file):
+                await status.edit_text("⚡️ <i>نسخه کامل مجزا منتشر نشده؛ ارسال صدای باکیفیت خود کلیپ...</i>", parse_mode="HTML")
+                display_title = search_pool[0] if search_pool else "Original Track"
                 with open(raw_file, 'rb') as f:
                     await context.bot.send_audio(
                         chat_id=query.message.chat_id,
                         audio=f,
                         title=display_title,
                         performer="Original Reel Sound",
-                        caption=f"🎵 <b>صدای اصلی با کیفیت ۳۲۰</b>\n🤖 {BOT_USERNAME}",
+                        caption=f"🎵 صدای استخراج‌شده با کیفیت ۳۲۰\n🤖 {BOT_USERNAME}",
                         parse_mode="HTML",
                         read_timeout=300,
                         write_timeout=300
@@ -555,62 +540,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             clean_files(prefix)
             clean_files(sample_cut)
-        return
-
-    # دانلود قطعی ترک انتخابی توسط کاربر (۳۲۰ استودیویی سبک های‌موزیک)
-    if data.startswith("himusic_dl_"):
-        idx = data.replace("himusic_dl_", "")
-        track_info = context.user_data.get('search_results', {}).get(idx)
-        if not track_info:
-            await query.edit_message_text("⚠️ درخواست منقضی شده است. لطفاً مجدداً ارسال فرمایید.")
-            return
-
-        status = await query.message.reply_text("⚡️ <b>در حال دانلود و ارسال نسخه ۳۲۰...</b>", parse_mode="HTML")
-        webpage_url = track_info.get('webpage_url')
-        target_title = track_info.get('title', 'Music')
-
-        uid = uuid.uuid4().hex[:8]
-        prefix = f"himusic_{uid}"
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': f"{prefix}.%(ext)s",
-            'quiet': True,
-            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([webpage_url])
-
-            actual_file = get_output_file(prefix)
-            if actual_file:
-                uploader = track_info.get('uploader', 'Artist')
-                dur = track_info.get('duration', 0)
-                caption = (
-                    f"🎵 <b>{html.escape(target_title)}</b>\n"
-                    f"👤 <code>{html.escape(uploader)}</code>\n"
-                    f"🔥 <b>نسخه کامل و اورجینال ۳۲۰</b>\n"
-                    f"🤖 {BOT_USERNAME}"
-                )
-                with open(actual_file, 'rb') as f:
-                    await context.bot.send_audio(
-                        chat_id=query.message.chat_id,
-                        audio=f,
-                        title=target_title,
-                        performer=uploader,
-                        duration=dur,
-                        caption=caption,
-                        parse_mode="HTML",
-                        read_timeout=300,
-                        write_timeout=300
-                    )
-                await status.delete()
-            else:
-                await status.edit_text("❌ خطا در آماده‌سازی فایل.")
-        except Exception as e:
-            await status.edit_text(f"خطا: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
-        finally:
-            clean_files(prefix)
         return
 
     # دانلود ویدیو یا صدای اصلی کلیپ
@@ -625,10 +554,111 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await process_direct_media(target_url, is_video, query.message.chat_id, context, status)
         return
 
+    if data.startswith("select_"):
+        idx = data.split("_")[1]
+        track = context.user_data.get('tracks', {}).get(idx)
+        if not track:
+            await query.edit_message_text("این درخواست منقضی شده است.")
+            return
+
+        context.user_data['selected_track'] = track
+        title = track.get('title', 'Music')
+        dur = track.get('duration_string', '--:--')
+
+        card = f"<b>{html.escape(title)}</b>\nمدت: <code>{dur}</code>\n\nفرمت دریافت را انتخاب کنید:"
+        kb = [
+            [InlineKeyboardButton("دریافت فایل صوتی (MP3)", callback_data="dl_audio_selected")],
+            [InlineKeyboardButton("دریافت موزیک ویدیو (MP4)", callback_data="dl_vid_selected")]
+        ]
+        await query.edit_message_text(card, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+
+    if data in ["dl_audio_selected", "dl_vid_selected"]:
+        if not consume_credit(user_id):
+            await query.message.reply_text("اعتبار شما تمام شده است.")
+            return
+        target_url = context.user_data.get('selected_track', {}).get('webpage_url')
+        is_video = (data == "dl_vid_selected")
+        status = await query.message.reply_text("در حال ارسال فایل...", parse_mode="HTML")
+        await process_direct_media(target_url, is_video, query.message.chat_id, context, status)
+
+# تابع دانلود مجهز به کلاینت‌های ضدبلاک یوتیوب
+async def execute_safe_download_and_send(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
+    uid = uuid.uuid4().hex[:8]
+    prefix = f"safe_{uid}"
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f"{prefix}.%(ext)s",
+        'quiet': True,
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}],
+    }
+    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+
+    search_queries = [
+        f"{query_text} official audio",
+        f"{query_text}"
+    ]
+
+    for sq in search_queries:
+        try:
+            search_opts = {'quiet': True}
+            search_opts.update(YTDL_ANTI_BLOCK_ARGS)
+
+            with yt_dlp.YoutubeDL(search_opts) as ydl:
+                res = ydl.extract_info(f"ytsearch3:{sq}", download=False)
+                entries = res.get('entries', [])
+
+            best_entry = None
+            for e in entries:
+                dur = e.get('duration', 0)
+                if dur and dur >= 45:
+                    best_entry = e
+                    break
+
+            if best_entry:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([best_entry['webpage_url']])
+
+                out_file = get_output_file(prefix)
+                if out_file:
+                    title = best_entry.get('title', query_text)
+                    uploader = best_entry.get('uploader', 'Artist')
+                    dur = best_entry.get('duration', 0)
+
+                    caption = (
+                        f"🎵 <b>{html.escape(title)}</b>\n"
+                        f"👤 <code>{html.escape(uploader)}</code>\n"
+                        f"🔥 <b>کیفیت ۳۲۰ استودیویی</b>\n"
+                        f"🤖 {BOT_USERNAME}"
+                    )
+                    with open(out_file, 'rb') as f:
+                        await context.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=f,
+                            title=title,
+                            performer=uploader,
+                            duration=dur,
+                            caption=caption,
+                            parse_mode="HTML",
+                            read_timeout=300,
+                            write_timeout=300
+                        )
+                    await status_msg.delete()
+                    clean_files(prefix)
+                    return True
+        except Exception:
+            clean_files(prefix)
+            continue
+
+    clean_files(prefix)
+    return False
+
 async def process_direct_media(target_url, is_video, chat_id, context, status_msg):
     uid = uuid.uuid4().hex[:8]
     prefix = f"direct_{uid}"
     ydl_opts = {'outtmpl': f"{prefix}.%(ext)s", 'max_filesize': 50 * 1024 * 1024, 'quiet': True}
+    ydl_opts.update(YTDL_ANTI_BLOCK_ARGS)
+
     if not is_video:
         ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '320'}]})
     else:
@@ -657,7 +687,7 @@ async def process_direct_media(target_url, is_video, chat_id, context, status_ms
     finally:
         clean_files(prefix)
 
-# وب‌سرور سبک برای Render
+# وب‌سرور سبک جهت رفع خطای پورت رندر
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -686,5 +716,5 @@ app.add_handler(CommandHandler("panel", admin_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با سیستم جستجو و دانلود سبک های‌موزیک فعال شد...")
+print("ربات با معماری ضدبلاک یوتیوب و پنل مدیریت فعال شد...")
 app.run_polling()
