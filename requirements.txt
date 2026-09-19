@@ -1,5 +1,5 @@
 python-telegram-bot
-yt-dlp
+yt-dlp>=2024.12.0
 shazamio
-requests
 beautifulsoup4
+requests
