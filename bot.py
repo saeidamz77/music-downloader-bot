@@ -46,7 +46,6 @@ conn.commit()
 
 shazam = Shazam()
 
-# تنظیمات کلاینت‌های ضدبلاک و پرسرعت
 FAST_CLIENT_CONFIG = {
     'quiet': True,
     'no_warnings': True,
@@ -56,7 +55,7 @@ FAST_CLIENT_CONFIG = {
         'instagram': {'api_client': ['web', 'graph']}
     },
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
     }
 }
 
@@ -138,6 +137,34 @@ def extract_music_keywords(title: str, desc: str) -> list:
         if c not in unique:
             unique.append(c)
     return unique
+
+def download_instagram_fallback(url: str, output_path: str) -> bool:
+    api_endpoints = [
+        "https://co.wuk.sh/api/json",
+        "https://api.cobalt.tools/api/json"
+    ]
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0"
+    }
+    payload = {"url": url, "downloadMode": "audio"}
+
+    for endpoint in api_endpoints:
+        try:
+            res = requests.post(endpoint, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                stream_url = res.json().get("url")
+                if stream_url:
+                    r = requests.get(stream_url, stream=True, timeout=15)
+                    if r.status_code == 200:
+                        with open(output_path, 'wb') as f:
+                            for chunk in r.iter_content(chunk_size=32768):
+                                if chunk: f.write(chunk)
+                        return True
+        except Exception:
+            continue
+    return False
 
 # ==================== پنل مدیریت ====================
 async def show_admin_panel(message_target):
@@ -385,24 +412,24 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(p_text, parse_mode="HTML")
         return
 
-    # استخراج قطعی نسخه کامل چند دقیقه‌ای
+    # پردازش مستقیم و ضد ارور برای دانلود آهنگ کامل
     if data == "extract_full_song_direct":
         if not consume_credit(user_id):
             await query.message.reply_text("اعتبار شما تمام شده است.")
             return
 
         url = context.user_data.get('media_url')
-        status = await query.edit_message_text("⚡️ <b>در حال پیدا کردن نسخه کامل ۳۲۰...</b>", parse_mode="HTML")
+        status = await query.edit_message_text("⚡️ <b>در حال شناسایی و دریافت نسخه کامل...</b>", parse_mode="HTML")
 
         song_candidates = []
         uid = uuid.uuid4().hex[:6]
         prefix = f"scan_{uid}"
         sample_file = f"{prefix}.mp3"
 
-        # ۱. استخراج متادیتای ریلز بدون دانلود سنگین ویدیو
-        ydl_opts_meta = {'quiet': True, 'skip_download': True}
-        ydl_opts_meta.update(FAST_CLIENT_CONFIG)
+        # ۱. تلاش برای خواندن متادیتا از yt-dlp بدون توقف برنامه در صورت بلاک بودن اینستاگرام
         try:
+            ydl_opts_meta = {'quiet': True, 'skip_download': True}
+            ydl_opts_meta.update(FAST_CLIENT_CONFIG)
             with yt_dlp.YoutubeDL(ydl_opts_meta) as ydl:
                 info = ydl.extract_info(url, download=False)
                 track_tag = info.get('track', '')
@@ -418,19 +445,21 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        # ۲. در صورت نیاز به شازام، دانلود جریان صوتی کم‌حجم در چند ثانیه
+        # ۲. در صورت خالی بودن متادیتا، استخراج صوت با API کمکی جهت شازام
         if not song_candidates:
-            ydl_opts_audio = {
-                'format': 'bestaudio[ext=m4a]/bestaudio/best',
-                'outtmpl': sample_file,
-                'max_filesize': 10 * 1024 * 1024,
-                'quiet': True
-            }
-            ydl_opts_audio.update(FAST_CLIENT_CONFIG)
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
-                    ydl.download([url])
-                if os.path.exists(sample_file):
+            downloaded_fb = download_instagram_fallback(url, sample_file)
+            if not downloaded_fb:
+                # تلاش دوم با yt-dlp ساده
+                try:
+                    ydl_audio = {'format': 'bestaudio/best', 'outtmpl': sample_file, 'quiet': True}
+                    ydl_audio.update(FAST_CLIENT_CONFIG)
+                    with yt_dlp.YoutubeDL(ydl_audio) as ydl:
+                        ydl.download([url])
+                except Exception:
+                    pass
+
+            if os.path.exists(sample_file):
+                try:
                     res = await shazam.recognize(sample_file)
                     track = res.get('track') if res else None
                     if track:
@@ -438,25 +467,34 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         sartist = clean_song_query(track.get('subtitle', ''))
                         if stitle:
                             song_candidates.append(f"{sartist} {stitle}".strip())
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-        # ۳. دانلود مستقیم نسخه کامل آهنگ بالای ۱ دقیقه
+        # ۳. دانلود نسخه اصلی و چند دقیقه‌ای (بالای ۱ دقیقه)
+        download_success = False
         target_name = song_candidates[0] if song_candidates else "Music"
-        download_success = await download_and_send_full_track(target_name, query.message.chat_id, context, status)
 
-        if not download_success and os.path.exists(sample_file):
-            # اگر هیچ نسخه آنلاینی نبود، صدای خود ریلز ارسال شود
-            with open(sample_file, 'rb') as f:
-                await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=f,
-                    title=target_name,
-                    performer="Reel Audio",
-                    caption=f"🎵 صدای اصلی کلیپ\n🤖 {BOT_USERNAME}",
-                    parse_mode="HTML"
-                )
-            await status.delete()
+        if song_candidates:
+            download_success = await download_and_send_full_track(target_name, query.message.chat_id, context, status)
+
+        # ۴. ارسال صوت مستقیم در صورتی که نسخه مجزایی پیدا نشود
+        if not download_success:
+            if not os.path.exists(sample_file):
+                download_instagram_fallback(url, sample_file)
+
+            if os.path.exists(sample_file):
+                with open(sample_file, 'rb') as f:
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id,
+                        audio=f,
+                        title=target_name,
+                        performer="Reel Audio",
+                        caption=f"🎵 صدای اصلی کلیپ\n🤖 {BOT_USERNAME}",
+                        parse_mode="HTML"
+                    )
+                await status.delete()
+            else:
+                await status.edit_text("❌ امکان بارگیری این پست وجود ندارد (پست خصوصی یا حذف شده است).")
 
         clean_files(prefix)
         return
@@ -509,7 +547,7 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             clean_files(prefix)
 
-# تابع دانلود آهنگ کامل و چند دقیقه‌ای
+# دانلود آهنگ کامل و چند دقیقه‌ای
 async def download_and_send_full_track(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
     uid = uuid.uuid4().hex[:8]
     prefix = f"full_{uid}"
@@ -538,7 +576,6 @@ async def download_and_send_full_track(query_text: str, chat_id: int, context: C
             best_entry = None
             for e in entries:
                 dur = e.get('duration', 0)
-                # بررسی اینکه حداقل بالای ۵۰ ثانیه (آهنگ کامل) باشد
                 if dur and dur >= 50:
                     best_entry = e
                     break
@@ -606,7 +643,7 @@ async def process_direct_video(target_url, chat_id, context, status_msg):
     finally:
         clean_files(prefix)
 
-# وب‌سرور داخلی برای فعال ماندن روی Render
+# وب‌سرور داخلی Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -635,5 +672,5 @@ app.add_handler(CommandHandler("panel", admin_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با سرعت فوق‌العاده و تحویل آهنگ کامل فعال شد...")
+print("ربات با بایپس کامل ارور اینستاگرام فعال شد...")
 app.run_polling()
