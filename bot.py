@@ -7,6 +7,7 @@ import html
 import sqlite3
 import threading
 import requests
+from urllib.parse import quote, unquote
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -18,9 +19,8 @@ from telegram.ext import (
     ContextTypes,
 )
 import yt_dlp
-from shazamio import Shazam
 
-# ==================== تنظیمات مدیریت و ربات ====================
+# ==================== تنظیمات سرور و مدیریت ====================
 TOKEN = os.environ.get("BOT_TOKEN") or "8924723567:AAH1ag1Ccc_t8DTy6u6ayw1kM8I9SWziuBY"
 BOT_USERNAME = os.environ.get("BOT_USERNAME") or "@Instadlmusicbot"
 SUPPORT_ID = "@saeed_mz77"
@@ -43,8 +43,6 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 conn.commit()
-
-shazam = Shazam()
 
 def get_or_create_user(user_id, referrer_id=None):
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -101,22 +99,26 @@ def consume_credit(user_id: int) -> bool:
 def clean_song_query(text: str) -> str:
     if not text: return ""
     clean = re.sub(r'https?://\S+|@[^\s]+|#[^\s]+', ' ', text)
-    clean = re.sub(r'(?i)(video by|reel by|audio by|original audio|remix|slowed|reverb|insta|clip|ریلز|پست)', ' ', clean)
+    clean = re.sub(r'(?i)(video by|reel by|audio by|original audio|remix|slowed|reverb|insta|clip|ریلز|پست|چنل|تلگرام)', ' ', clean)
     clean = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', clean)
     clean = re.sub(r'[^\w\s\d\u0600-\u06FF]', ' ', clean)
     return ' '.join(clean.split())
 
-# استخراج عنوان و کپشن ریلز اینستاگرام از متادیتای سبک oEmbed
-def get_instagram_title_fast(url: str) -> str:
+# ==================== موتور قدرتمند کاوش عنوان ریلز ====================
+def deep_crawl_instagram_meta(url: str) -> str:
+    """استخراج مستقیم نام آهنگ از متادیتای عمومی وب بدون نیاز به لاگین اینستاگرام"""
+    shortcode_match = re.search(r'/(?:reel|reels|p)/([A-Za-z0-9_-]+)', url)
+    if not shortcode_match:
+        return ""
+    code = shortcode_match.group(1)
+
+    # روش ۱: اوپن گراف اینستاگرام
     try:
-        clean_url = url.split('?')[0].rstrip('/')
-        oembed_url = f"https://api.instagram.com/oembed/?url={clean_url}"
+        oembed_url = f"https://api.instagram.com/oembed/?url=https://www.instagram.com/p/{code}/"
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(oembed_url, headers=headers, timeout=6)
         if r.status_code == 200:
-            data = r.json()
-            title = data.get('title', '')
-            author = data.get('author_name', '')
+            title = r.json().get('title', '')
             found = re.findall(r'(?:موزیک|آهنگ|اهنگ|music|song|track)\s*[:：\-]?\s*([^\n\r#@]+)', title, re.IGNORECASE)
             if found:
                 return clean_song_query(found[0])
@@ -125,6 +127,20 @@ def get_instagram_title_fast(url: str) -> str:
                 return first_line
     except Exception:
         pass
+
+    # روش ۲: واکشی از سرویس‌های میرور عمومی
+    try:
+        mirror_url = f"https://www.ddinstagram.com/reel/{code}"
+        headers = {"User-Agent": "Twitterbot/1.0"}
+        r = requests.get(mirror_url, headers=headers, timeout=6)
+        if r.status_code == 200:
+            match = re.search(r'<meta property="og:title" content="([^"]+)"', r.text)
+            if match:
+                raw_t = match.group(1)
+                return clean_song_query(raw_t)
+    except Exception:
+        pass
+
     return ""
 
 # ==================== پنل مدیریت ====================
@@ -140,10 +156,10 @@ async def show_admin_panel(message_target):
         f"👥 کل کاربران: <code>{total_users} نفر</code>\n"
         f"⭐️ کاربران VIP: <code>{vip_users} نفر</code>\n"
         "-------------------\n"
-        "یک بخش را انتخاب کنید:"
+        "یک بخش را انتخاب فرمایید:"
     )
     kb = [
-        [InlineKeyboardButton("📊 آمار دقیق کاربران", callback_data="admin_stats")],
+        [InlineKeyboardButton("📊 آمار کاربران", callback_data="admin_stats")],
         [InlineKeyboardButton("👑 فعال‌سازی VIP", callback_data="admin_set_vip"), InlineKeyboardButton("❌ لغو VIP", callback_data="admin_rem_vip")],
         [InlineKeyboardButton("➕ افزودن اعتبار", callback_data="admin_add_credit")],
         [InlineKeyboardButton("📢 ارسال پیام همگانی", callback_data="admin_broadcast")],
@@ -179,11 +195,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     welcome_text = (
-        "🎧 <b>ربات دانلود آهنگ کامل (Full 320 Track)</b>\n\n"
-        "⚡️ <b>روش‌های سریع دریافت آهنگ:</b>\n"
+        "👑 <b>ربات هوشمند کاوش و دانلود آهنگ کامل (نسخه اصلی ۳۲۰)</b>\n\n"
+        "⚡️ <b>روش‌های دریافت آهنگ:</b>\n"
         "▫️ لینک ریلز اینستاگرام یا یوتیوب را بفرستید.\n"
-        "▫️ ویدیو یا ویس کلیپ را مستقیماً به داخل همین چت فوروارد کنید.\n"
-        "▫️ نام آهنگ یا خواننده را بنویسید."
+        "▫️ نام خواننده یا بخشی از متن آهنگ را بنویسید."
     )
     kb = [
         [InlineKeyboardButton("👤 حساب کاربری", callback_data="user_panel")],
@@ -241,7 +256,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 conn.commit()
                 await update.message.reply_text(f"✅ تعداد {amount} اعتبار اضافه شد.", parse_mode="HTML")
             except Exception:
-                await update.message.reply_text("❌ مثال: <code>1773399042 10</code>", parse_mode="HTML")
+                await update.message.reply_text("❌ فرمت صحیح: <code>1773399042 10</code>", parse_mode="HTML")
             await show_admin_panel(update.message)
             return
 
@@ -274,25 +289,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_vip and req_left <= 0:
         bot_user = BOT_USERNAME.replace("@", "")
         invite_link = f"https://t.me/{bot_user}?start={user_id}"
-        msg = f"🔒 <b>اعتبار شما تمام شده است!</b>\n\nبرای شارژ، لینک زیر را بفرستید:\n<code>{invite_link}</code>"
+        msg = f"🔒 <b>اعتبار رایگان شما تمام شده است!</b>\n\nبرای دریافت ۳ دانلود رایگان، لینک اختصاصی خود را به دوستان بفرستید:\n<code>{invite_link}</code>"
         kb = [[InlineKeyboardButton("⭐️ خرید اشتراک VIP", callback_data="buy_vip")]]
         await update.message.reply_text(msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
         return
 
     text = update.message.text.strip()
 
+    # اگر کاربر لینک فرستاده باشد
     if is_link(text):
-        context.user_data['media_url'] = text
-        credit_txt = "نامحدود (VIP)" if is_vip else f"{req_left} عدد"
-        menu_text = f"🎯 <b>رسانه شناسایی شد</b> (اعتبار: <code>{credit_txt}</code>)\nروی دریافت قطعه کامل بزنید:"
-        buttons = [
-            [InlineKeyboardButton("🔥 دریافت آهنگ کامل ۳۲۰", callback_data="fast_full_music")]
-        ]
-        await update.message.reply_text(menu_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(buttons))
+        if not consume_credit(user_id):
+            await update.message.reply_text("اعتبار شما تمام شده است.")
+            return
+
+        status = await update.message.reply_text("🔍 <b>در حال کاوش و ردیابی آهنگ اصلی ریلز...</b>", parse_mode="HTML")
+        
+        # استخراج نام از ریلز
+        extracted_query = deep_crawl_instagram_meta(text)
+        if not extracted_query:
+            # روش جایگزین با متادیتای یوتیوب
+            try:
+                ydl_opts_meta = {'quiet': True, 'skip_download': True, 'extractor_args': {'youtube': {'player_client': ['android']}}}
+                with yt_dlp.YoutubeDL(ydl_opts_meta) as ydl:
+                    inf = ydl.extract_info(text, download=False)
+                    extracted_query = inf.get('track') or inf.get('title', '')
+            except Exception:
+                pass
+
+        final_query = clean_song_query(extracted_query)
+        if final_query and len(final_query) > 2:
+            await status.edit_text(f"🎯 <b>اثر شناسایی شد:</b> <code>{html.escape(final_query)}</code>\n⚡️ در حال دانلود نسخه کامل ۳۲۰...", parse_mode="HTML")
+            done = await download_strictly_full_track(final_query, update.message.chat_id, context, status)
+            if not done:
+                await status.edit_text("❌ فایل کامل در وب یافت نشد. لطفاً نام آهنگ را مستقیم تایپ کنید.")
+        else:
+            await status.edit_text("❌ متادیتای این ریلز توسط اینستاگرام مسدود شده است.\n💡 <b>نام آهنگ یا قسمتی از متن آن را تایپ کنید تا فوراً فایل ۳۲۰ ارسال شود.</b>")
         return
 
-    # سرچ متنی مستقیم آهنگ
-    search_msg = await update.message.reply_text(f"🔍 در حال سرچ «{html.escape(text)}»...", parse_mode="HTML")
+    # اگر متن یا نام آهنگ فرستاده باشد (سرچ مستقیم قدرتمند)
+    await execute_text_music_search(text, update.message, context)
+
+async def execute_text_music_search(query_str: str, msg_obj, context: ContextTypes.DEFAULT_TYPE):
+    status = await msg_obj.reply_text(f"🔍 در حال کاوش نسخه کامل «{html.escape(query_str)}»...", parse_mode="HTML")
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
@@ -302,12 +340,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            res = ydl.extract_info(f"ytsearch4:{text}", download=False)
+            res = ydl.extract_info(f"ytsearch4:{query_str}", download=False)
             tracks = res.get('entries', [])
 
         valid = [t for t in tracks if t.get('duration', 0) >= 40]
         if not valid:
-            await search_msg.edit_text("❌ قطعه‌ای یافت نشد.")
+            await status.edit_text("❌ نتیجه‌ای با این عنوان یافت نشد.")
             return
 
         context.user_data['tracks'] = {str(i): t for i, t in enumerate(valid)}
@@ -317,44 +355,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dur = t.get('duration_string', '--:--')
             buttons.append([InlineKeyboardButton(f"🎶 {i+1}. {title} [{dur}]", callback_data=f"select_{i}")])
 
-        await search_msg.edit_text("🎵 قطعه مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
+        await status.edit_text("🎵 نسخه مورد نظر را انتخاب کنید:", reply_markup=InlineKeyboardMarkup(buttons))
     except Exception as e:
-        await search_msg.edit_text(f"خطا در جستجو: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
-
-# هندلر دریافت مستقیم ویدیو و ویس (بدون ارور لینک)
-async def handle_direct_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not await check_membership(user_id, context):
-        await update.message.reply_text("ابتدا در کانال عضو شوید.")
-        return
-
-    if not consume_credit(user_id):
-        await update.message.reply_text("سهمیه دانلود شما تمام شده است.")
-        return
-
-    status = await update.message.reply_text("🎧 <b>در حال تحلیل صوتی فایل...</b>", parse_mode="HTML")
-    uid = uuid.uuid4().hex[:6]
-    temp_file = f"up_{uid}.mp3"
-
-    try:
-        target = update.message.video or update.message.audio or update.message.voice or update.message.document
-        bot_file = await context.bot.get_file(target.file_id)
-        await bot_file.download_to_drive(temp_file)
-
-        res = await shazam.recognize(temp_file)
-        track = res.get('track') if res else None
-        if track:
-            stitle = clean_song_query(track.get('title', ''))
-            sartist = clean_song_query(track.get('subtitle', ''))
-            song_name = f"{sartist} {stitle}".strip()
-            await status.edit_text(f"🔍 <b>شناسایی شد:</b> <code>{html.escape(song_name)}</code>\n⚡️ در حال دانلود نسخه کامل ۳۲۰...", parse_mode="HTML")
-            await download_and_send_full_track(song_name, update.message.chat_id, context, status)
-        else:
-            await status.edit_text("❌ نام قطعه با تحلیل صوتی شناسایی نشد؛ لطفاً نام آهنگ را بنویسید.")
-    except Exception as e:
-        await status.edit_text(f"خطا: {e}")
-    finally:
-        clean_files(f"up_{uid}")
+        await status.edit_text(f"خطا در جستجو: {e}")
 
 async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -392,14 +395,14 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "check_join":
         if await check_membership(user_id, context):
             await query.message.delete()
-            await query.message.reply_text("عضویت تأیید شد!")
+            await query.message.reply_text("عضویت تأیید شد! اکنون لینک یا نام آهنگ را بفرستید.")
         else:
             await query.answer("هنوز عضو کانال نشده‌اید!", show_alert=True)
         return
 
     if data == "buy_vip":
         sup_url = f"https://t.me/{SUPPORT_ID.replace('@', '')}"
-        vip_text = f"👑 <b>عضویت طلایی</b>\nتعرفه: {VIP_PRICE_TEXT}\nکارت: <code>{CARD_NUMBER}</code>"
+        vip_text = f"👑 <b>عضویت ویژه طلایی</b>\nتعرفه: {VIP_PRICE_TEXT}\nکارت: <code>{CARD_NUMBER}</code>"
         await query.message.reply_text(vip_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💬 پشتیبانی", url=sup_url)]]))
         return
 
@@ -412,37 +415,6 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(p_text, parse_mode="HTML")
         return
 
-    # استخراج قطعی نسخه کامل چند دقیقه‌ای
-    if data == "fast_full_music":
-        if not consume_credit(user_id):
-            await query.message.reply_text("اعتبار شما تمام شده است.")
-            return
-
-        url = context.user_data.get('media_url')
-        status = await query.edit_message_text("⚡️ <b>در حال استخراج نام اثر و دریافت آهنگ کامل...</b>", parse_mode="HTML")
-
-        # گام ۱: خواندن سریع عنوان بدون نیاز به دانلود ریلز
-        target_song = get_instagram_title_fast(url)
-
-        # گام ۲: اگر با oEmbed گرفته نشد، استفاده از yt-dlp کلاینت موبایل
-        if not target_song:
-            try:
-                ydl_opts_meta = {'quiet': True, 'skip_download': True, 'extractor_args': {'youtube': {'player_client': ['android']}}}
-                with yt_dlp.YoutubeDL(ydl_opts_meta) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    target_song = info.get('track') or clean_song_query(info.get('title', ''))
-            except Exception:
-                pass
-
-        if not target_song:
-            target_song = "Music"
-
-        # گام ۳: جستجو و دانلود قطعی نسخه ۳۲۰ کامل (بالای ۱ دقیقه)
-        download_success = await download_and_send_full_track(target_song, query.message.chat_id, context, status)
-        if not download_success:
-            await status.edit_text("❌ اینستاگرام دسترسی لینک را مسدود کرد. لطفاً **خود ویدیو یا فایل صوتی ریلز** را فوروارد کنید تا ربات فوراً آهنگ کامل را تحویل دهد.")
-        return
-
     if data.startswith("select_"):
         idx = data.split("_")[1]
         track = context.user_data.get('tracks', {}).get(idx)
@@ -450,9 +422,9 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("درخواست منقضی شده است.")
             return
 
-        status = await query.edit_message_text("⚡️ در حال دریافت قطعه انتخابی...", parse_mode="HTML")
+        status = await query.edit_message_text("⚡️ در حال دانلود قطعه انتخابی...", parse_mode="HTML")
         uid = uuid.uuid4().hex[:6]
-        prefix = f"pick_{uid}"
+        prefix = f"dl_{uid}"
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': f"{prefix}.%(ext)s",
@@ -482,8 +454,8 @@ async def button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             clean_files(prefix)
 
-# دانلود آهنگ کامل و چند دقیقه‌ای
-async def download_and_send_full_track(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
+# تابع دانلود و ارسال قطعی آهنگ کامل ۳۲۰
+async def download_strictly_full_track(query_text: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE, status_msg) -> bool:
     uid = uuid.uuid4().hex[:8]
     prefix = f"full_{uid}"
     
@@ -556,7 +528,7 @@ async def download_and_send_full_track(query_text: str, chat_id: int, context: C
     clean_files(prefix)
     return False
 
-# وب‌سرور داخلی Render جهت پورت بایندینگ
+# وب‌سرور داخلی Render
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -583,8 +555,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("admin", admin_command))
 app.add_handler(CommandHandler("panel", admin_command))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(MessageHandler(filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL, handle_direct_upload))
 app.add_handler(CallbackQueryHandler(button_click))
 
-print("ربات با معماری ضدبلاک و دریافت مستقیم فایل فعال شد...")
+print("ربات با موتور کاوش هوشمند و بدون بن فعال شد...")
 app.run_polling()
